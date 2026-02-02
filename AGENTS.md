@@ -77,3 +77,8 @@ Whenever code is changed, the assistant must end with:
 - Quote any git paths containing brackets or parentheses when staging or committing so the shell does not treat them as globs or subshells.
 - When running git rebase, avoid opening editors—export `GIT_EDITOR=:` and `GIT_SEQUENCE_EDITOR=:` (or pass `--no-edit`) so the default messages are used automatically.
 - Never amend commits unless you have explicit written approval in the task thread.
+
+## Command approval (new features)
+
+- Before implementing a new feature, list the commands you plan to run and get approval.
+- You do not need to confirm individual commands unless they include significant file/folder deletions or are potentially app-breaking.
