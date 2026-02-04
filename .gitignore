@@ -1,23 +1,5 @@
-# Python
-__pycache__/
-*.pyc
-*.pyo
 .venv/
-venv/
-.env
-
-# Data
-data/
-samples/
-output/
-
-# Outputs / artifacts
-output/
-*.jsonl
-*.sqlite
-*.db
-
-# OS/editor
-.DS_Store
-.vscode/
-.idea/
+bin/
+lib/
+lib64/
+pyvenv.cfg
