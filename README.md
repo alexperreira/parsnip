@@ -65,6 +65,38 @@ Summarize Phase 1 output without printing file paths:
 PYTHONPATH=src python -m file_parser.phase1_report --input output/phase1.jsonl
 ```
 
+## Phase 2 OCR (tesseract adapter)
+
+Phase 2 runs OCR for files classified as `scanned` or `mixed` in Phase 1. It uses `tesseract` and `pdftoppm` (Poppler) if installed. If either is missing, entries are written with `status: pending_ocr` and an error code.
+
+```bash
+PYTHONPATH=src python -m file_parser.phase2_ocr --input /path/to/input --phase1 output/phase1.jsonl --output output/phase2_ocr.jsonl
+```
+
+Include `unknown` classification files:
+
+```bash
+PYTHONPATH=src python -m file_parser.phase2_ocr --input /path/to/input --phase1 output/phase1.jsonl --output output/phase2_ocr.jsonl --include-unknown
+```
+
+Control concurrency:
+
+```bash
+PYTHONPATH=src python -m file_parser.phase2_ocr --input /path/to/input --phase1 output/phase1.jsonl --output output/phase2_ocr.jsonl --workers 4
+```
+
+Deterministic output order (forces single worker):
+
+```bash
+PYTHONPATH=src python -m file_parser.phase2_ocr --input /path/to/input --phase1 output/phase1.jsonl --output output/phase2_ocr.jsonl --ordered
+```
+
+Write per-page text files instead of inline text:
+
+```bash
+PYTHONPATH=src python -m file_parser.phase2_ocr --input /path/to/input --phase1 output/phase1.jsonl --output output/phase2_ocr.jsonl --text-dir output/ocr_text
+```
+
 ## Dependencies
 
 - Phase 0: Python standard library only
