@@ -131,14 +131,14 @@ def _ensure_engine_dependencies():
     return which("tesseract") is not None and which("pdftoppm") is not None
 
 
-def _render_pdf_pages(temp_pdf, output_dir, dpi, total_pages):
+def _render_pdf_page_range(temp_pdf, output_dir, dpi, start_page, end_page):
     render_prefix = Path(output_dir) / "page"
     render_cmd = [
         "pdftoppm",
         "-f",
-        "1",
+        str(start_page),
         "-l",
-        str(total_pages),
+        str(end_page),
         "-r",
         str(dpi),
         "-png",
@@ -213,13 +213,9 @@ def _ocr_with_tesseract(
         if total_pages <= 0:
             return _pending_record(record, classification, "InvalidPageCount")
 
-        try:
-            render_prefix = _render_pdf_pages(temp_pdf, temp_dir.name, dpi, total_pages)
-        except (subprocess.SubprocessError, OSError):
-            return _pending_record(record, classification, "OcrError")
-
         if page_workers is None or page_workers < 1:
             page_workers = 1
+        batch_size = max(1, page_workers * 2)
 
         def _ocr_page(page_index):
             image_path = f"{render_prefix}-{page_index + 1}.png"
@@ -255,27 +251,80 @@ def _ocr_with_tesseract(
                 )
 
         pages = [None] * total_pages
+        started_ocr = False
         if page_workers <= 1 or total_pages <= 1:
-            for page_index in range(total_pages):
-                page_index, page_record, page_error = _ocr_page(page_index)
-                pages[page_index] = page_record
-                if page_error:
+            for batch_start in range(1, total_pages + 1, batch_size):
+                batch_end = min(total_pages, batch_start + batch_size - 1)
+                try:
+                    render_prefix = _render_pdf_page_range(
+                        temp_pdf,
+                        temp_dir.name,
+                        dpi,
+                        batch_start,
+                        batch_end,
+                    )
+                except (subprocess.SubprocessError, OSError):
+                    if not started_ocr:
+                        return _pending_record(record, classification, "OcrError")
                     errors = "OcrError"
-        else:
-            with ThreadPoolExecutor(max_workers=page_workers) as executor:
-                futures = set()
-                max_in_flight = max(1, page_workers * 2)
-                next_index = 0
-                while next_index < total_pages or futures:
-                    while next_index < total_pages and len(futures) < max_in_flight:
-                        futures.add(executor.submit(_ocr_page, next_index))
-                        next_index += 1
-                    done = next(as_completed(futures))
-                    futures.remove(done)
-                    page_index, page_record, page_error = done.result()
+                    for page_number in range(batch_start, total_pages + 1):
+                        pages[page_number - 1] = {
+                            "page_index": page_number - 1,
+                            "text": "",
+                            "confidence": None,
+                            "errors": "OcrError",
+                        }
+                    break
+                for page_number in range(batch_start, batch_end + 1):
+                    page_index = page_number - 1
+                    page_index, page_record, page_error = _ocr_page(page_index)
+                    started_ocr = True
                     pages[page_index] = page_record
                     if page_error:
                         errors = "OcrError"
+                    try:
+                        os.remove(f"{render_prefix}-{page_number}.png")
+                    except OSError:
+                        pass
+        else:
+            with ThreadPoolExecutor(max_workers=page_workers) as executor:
+                for batch_start in range(1, total_pages + 1, batch_size):
+                    batch_end = min(total_pages, batch_start + batch_size - 1)
+                    try:
+                        render_prefix = _render_pdf_page_range(
+                            temp_pdf,
+                            temp_dir.name,
+                            dpi,
+                            batch_start,
+                            batch_end,
+                        )
+                    except (subprocess.SubprocessError, OSError):
+                        if not started_ocr:
+                            return _pending_record(record, classification, "OcrError")
+                        errors = "OcrError"
+                        for page_number in range(batch_start, total_pages + 1):
+                            pages[page_number - 1] = {
+                                "page_index": page_number - 1,
+                                "text": "",
+                                "confidence": None,
+                                "errors": "OcrError",
+                            }
+                        break
+                    futures = set()
+                    for page_number in range(batch_start, batch_end + 1):
+                        page_index = page_number - 1
+                        futures.add(executor.submit(_ocr_page, page_index))
+                    for done in as_completed(futures):
+                        page_index, page_record, page_error = done.result()
+                        started_ocr = True
+                        pages[page_index] = page_record
+                        if page_error:
+                            errors = "OcrError"
+                    for page_number in range(batch_start, batch_end + 1):
+                        try:
+                            os.remove(f"{render_prefix}-{page_number}.png")
+                        except OSError:
+                            pass
 
         return {
             "file_id": record.get("file_id"),

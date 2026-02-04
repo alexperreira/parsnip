@@ -2,6 +2,23 @@
 
 This repo contains a Python-first file parsing pipeline. Phase 0 builds a manifest (no content extraction). Phase 1 performs PDF detection only (no OCR) to classify PDFs as text/scanned/mixed/unknown.
 
+## End-to-end pipeline (Phase 0-2)
+
+Run the full pipeline end-to-end:
+
+```bash
+PYTHONPATH=src python -m file_parser.run_pipeline --input /path/to/input --output-dir output
+```
+
+Common flags:
+
+- `--resume` to append safely instead of failing on existing outputs
+- `--include-unknown` to OCR `unknown` classifications
+- `--workers N` and `--page-workers N` to control concurrency
+- `--max-pages N` to cap OCR pages per PDF
+- `--text-dir output/ocr_text` to write per-page text files
+- `--progress-interval N` to print Phase 2 progress
+
 ## Phase 0: Manifest builder (no content extraction)
 
 Build a JSONL manifest of PDFs on disk and PDFs inside zip files:
