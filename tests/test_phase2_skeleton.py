@@ -1,7 +1,10 @@
+import contextlib
+import io
 import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from file_parser.phase2_ocr import build_phase2
 
@@ -106,6 +109,54 @@ class Phase2SkeletonTest(unittest.TestCase):
                 json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines()
             ]
             self.assertEqual([r["file_id"] for r in output_records], ["a", "b", "c"])
+
+    def test_phase2_page_workers_cap_warning(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            phase1_path = root / "phase1.jsonl"
+            phase1_path.write_text(
+                json.dumps({"file_id": "a", "ext": "pdf", "classification": "scanned"}) + "\n",
+                encoding="utf-8",
+            )
+            output_path = root / "phase2.jsonl"
+            buffer = io.StringIO()
+            with mock.patch("file_parser.phase2_ocr.os.cpu_count", return_value=4):
+                with contextlib.redirect_stdout(buffer):
+                    build_phase2(
+                        root,
+                        phase1_path,
+                        output_path,
+                        resume=False,
+                        engine="noop",
+                        workers=2,
+                        page_workers=4,
+                    )
+            output = buffer.getvalue()
+            self.assertIn("capping page_workers", output)
+
+    def test_phase2_worker_oversubscription_warning(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            phase1_path = root / "phase1.jsonl"
+            phase1_path.write_text(
+                json.dumps({"file_id": "a", "ext": "pdf", "classification": "scanned"}) + "\n",
+                encoding="utf-8",
+            )
+            output_path = root / "phase2.jsonl"
+            buffer = io.StringIO()
+            with mock.patch("file_parser.phase2_ocr.os.cpu_count", return_value=1):
+                with contextlib.redirect_stdout(buffer):
+                    build_phase2(
+                        root,
+                        phase1_path,
+                        output_path,
+                        resume=False,
+                        engine="noop",
+                        workers=2,
+                        page_workers=1,
+                    )
+            output = buffer.getvalue()
+            self.assertIn("exceeds CPU count", output)
 
 
 if __name__ == "__main__":

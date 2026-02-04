@@ -85,6 +85,14 @@ Control concurrency:
 PYTHONPATH=src python -m file_parser.phase2_ocr --input /path/to/input --phase1 output/phase1.jsonl --output output/phase2_ocr.jsonl --workers 4
 ```
 
+Parallelize OCR within each PDF (balance CPU/memory use):
+
+```bash
+PYTHONPATH=src python -m file_parser.phase2_ocr --input /path/to/input --phase1 output/phase1.jsonl --output output/phase2_ocr.jsonl --page-workers 2
+```
+
+Note: `page-workers` is capped based on CPU count and `--workers`, and a warning is printed if combined concurrency exceeds CPU count.
+
 Deterministic output order (forces single worker):
 
 ```bash

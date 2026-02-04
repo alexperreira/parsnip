@@ -131,6 +131,60 @@ def _ensure_engine_dependencies():
     return which("tesseract") is not None and which("pdftoppm") is not None
 
 
+def _render_pdf_pages(temp_pdf, output_dir, dpi, total_pages):
+    render_prefix = Path(output_dir) / "page"
+    render_cmd = [
+        "pdftoppm",
+        "-f",
+        "1",
+        "-l",
+        str(total_pages),
+        "-r",
+        str(dpi),
+        "-png",
+        temp_pdf,
+        str(render_prefix),
+    ]
+    subprocess.run(render_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return render_prefix
+
+
+def _count_phase1_targets(phase1_path, include_unknown):
+    total = 0
+    with phase1_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if record.get("ext") != "pdf":
+                continue
+            classification = record.get("classification", "unknown")
+            if classification not in ("scanned", "mixed", "unknown"):
+                classification = "unknown"
+            if classification == "unknown" and not include_unknown:
+                continue
+            if classification == "text":
+                continue
+            total += 1
+    return total
+
+
+def _maybe_print_progress(processed, total, started, last_print, interval):
+    if interval <= 0 or total <= 0:
+        return last_print
+    now = time.monotonic()
+    if now - last_print < interval:
+        return last_print
+    percent = processed / total * 100
+    elapsed = round(now - started, 3)
+    print(f"Progress: {processed}/{total} ({percent:.1f}%) elapsed_seconds={elapsed}", flush=True)
+    return now
+
+
 def _ocr_with_tesseract(
     record,
     classification,
@@ -140,13 +194,13 @@ def _ocr_with_tesseract(
     max_pages,
     text_dir,
     page_timeout,
+    page_workers,
 ):
     if not _ensure_engine_dependencies():
         return _pending_record(record, classification, "MissingTesseractOrPdftoppm")
 
     temp_pdf = None
     temp_dir = tempfile.TemporaryDirectory()
-    pages = []
     errors = None
     try:
         temp_pdf = _open_pdf_as_tempfile(record, root_path)
@@ -156,25 +210,22 @@ def _ocr_with_tesseract(
         total_pages = int(page_count)
         if max_pages is not None:
             total_pages = min(total_pages, max_pages)
+        if total_pages <= 0:
+            return _pending_record(record, classification, "InvalidPageCount")
 
-        for page_index in range(total_pages):
-            render_path = Path(temp_dir.name) / f"page_{page_index}"
-            render_cmd = [
-                "pdftoppm",
-                "-f",
-                str(page_index + 1),
-                "-l",
-                str(page_index + 1),
-                "-r",
-                str(dpi),
-                "-png",
-                "-singlefile",
-                temp_pdf,
-                str(render_path),
-            ]
+        try:
+            render_prefix = _render_pdf_pages(temp_pdf, temp_dir.name, dpi, total_pages)
+        except (subprocess.SubprocessError, OSError):
+            return _pending_record(record, classification, "OcrError")
+
+        if page_workers is None or page_workers < 1:
+            page_workers = 1
+
+        def _ocr_page(page_index):
+            image_path = f"{render_prefix}-{page_index + 1}.png"
             try:
-                subprocess.run(render_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                image_path = f"{render_path}.png"
+                if not Path(image_path).is_file():
+                    raise FileNotFoundError(image_path)
                 ocr_cmd = [
                     "tesseract",
                     image_path,
@@ -194,12 +245,37 @@ def _ocr_with_tesseract(
                 text = ocr_run.stdout.decode("utf-8", errors="replace")
                 if text_dir:
                     text_path = _write_text_page(text_dir, record["file_id"], page_index, text)
-                    pages.append({"page_index": page_index, "text_path": text_path, "confidence": None})
-                else:
-                    pages.append({"page_index": page_index, "text": text, "confidence": None})
+                    return page_index, {"page_index": page_index, "text_path": text_path, "confidence": None}, None
+                return page_index, {"page_index": page_index, "text": text, "confidence": None}, None
             except (subprocess.SubprocessError, OSError):
-                pages.append({"page_index": page_index, "text": "", "confidence": None, "errors": "OcrError"})
-                errors = "OcrError"
+                return (
+                    page_index,
+                    {"page_index": page_index, "text": "", "confidence": None, "errors": "OcrError"},
+                    "OcrError",
+                )
+
+        pages = [None] * total_pages
+        if page_workers <= 1 or total_pages <= 1:
+            for page_index in range(total_pages):
+                page_index, page_record, page_error = _ocr_page(page_index)
+                pages[page_index] = page_record
+                if page_error:
+                    errors = "OcrError"
+        else:
+            with ThreadPoolExecutor(max_workers=page_workers) as executor:
+                futures = set()
+                max_in_flight = max(1, page_workers * 2)
+                next_index = 0
+                while next_index < total_pages or futures:
+                    while next_index < total_pages and len(futures) < max_in_flight:
+                        futures.add(executor.submit(_ocr_page, next_index))
+                        next_index += 1
+                    done = next(as_completed(futures))
+                    futures.remove(done)
+                    page_index, page_record, page_error = done.result()
+                    pages[page_index] = page_record
+                    if page_error:
+                        errors = "OcrError"
 
         return {
             "file_id": record.get("file_id"),
@@ -237,8 +313,10 @@ def build_phase2(
     max_pages=None,
     text_dir=None,
     page_timeout=120,
+    page_workers=1,
     workers=1,
     ordered=False,
+    progress_interval=0,
 ):
     root_path = Path(input_path).resolve()
     if not root_path.exists() or not root_path.is_dir():
@@ -273,9 +351,34 @@ def build_phase2(
     counts_by_class = {"scanned": 0, "mixed": 0, "unknown": 0}
     started = time.monotonic()
     errors = 0
+    processed = 0
+    progress_total = 0
+    last_progress = started
 
     if ordered and workers > 1:
         workers = 1
+    cpu_count = os.cpu_count() or 1
+    if page_workers < 1:
+        page_workers = 1
+    if workers < 1:
+        workers = 1
+    requested_page_workers = page_workers
+    max_page_workers = max(1, cpu_count // workers)
+    if requested_page_workers > max_page_workers:
+        page_workers = max_page_workers
+        print(
+            "Warning: capping page_workers to avoid CPU over-subscription "
+            f"(requested={requested_page_workers}, cap={page_workers}, workers={workers}, cpu={cpu_count}).",
+            flush=True,
+        )
+    if workers * page_workers > cpu_count:
+        print(
+            "Warning: workers * page_workers exceeds CPU count "
+            f"(workers={workers}, page_workers={page_workers}, cpu={cpu_count}).",
+            flush=True,
+        )
+    if progress_interval > 0:
+        progress_total = _count_phase1_targets(phase1_path, include_unknown)
 
     def _process_record(classification, record):
         if engine != "tesseract":
@@ -289,6 +392,7 @@ def build_phase2(
             max_pages=max_pages,
             text_dir=text_dir,
             page_timeout=page_timeout,
+            page_workers=page_workers,
         )
 
     with output_path.open(output_mode, encoding="utf-8") as out_handle:
@@ -316,13 +420,29 @@ def build_phase2(
                         continue
                     if resume_index and not resume_index.add(file_id):
                         skipped += 1
+                        processed += 1
+                        last_progress = _maybe_print_progress(
+                            processed,
+                            progress_total,
+                            started,
+                            last_progress,
+                            progress_interval,
+                        )
                         continue
                     _, output_record = _process_record(classification, record)
                     if output_record.get("errors"):
                         errors += 1
                     out_handle.write(json.dumps(output_record, ensure_ascii=True) + "\n")
                     written += 1
+                    processed += 1
                     counts_by_class[classification] += 1
+                    last_progress = _maybe_print_progress(
+                        processed,
+                        progress_total,
+                        started,
+                        last_progress,
+                        progress_interval,
+                    )
         else:
             with ThreadPoolExecutor(max_workers=workers) as executor:
                 futures = set()
@@ -350,6 +470,14 @@ def build_phase2(
                             continue
                         if resume_index and not resume_index.add(file_id):
                             skipped += 1
+                            processed += 1
+                            last_progress = _maybe_print_progress(
+                                processed,
+                                progress_total,
+                                started,
+                                last_progress,
+                                progress_interval,
+                            )
                             continue
 
                         futures.add(executor.submit(_process_record, classification, record))
@@ -361,7 +489,15 @@ def build_phase2(
                                 errors += 1
                             out_handle.write(json.dumps(output_record, ensure_ascii=True) + "\n")
                             written += 1
+                            processed += 1
                             counts_by_class[classification_out] += 1
+                            last_progress = _maybe_print_progress(
+                                processed,
+                                progress_total,
+                                started,
+                                last_progress,
+                                progress_interval,
+                            )
 
                 for future in as_completed(futures):
                     classification_out, output_record = future.result()
@@ -369,7 +505,15 @@ def build_phase2(
                         errors += 1
                     out_handle.write(json.dumps(output_record, ensure_ascii=True) + "\n")
                     written += 1
+                    processed += 1
                     counts_by_class[classification_out] += 1
+                    last_progress = _maybe_print_progress(
+                        processed,
+                        progress_total,
+                        started,
+                        last_progress,
+                        progress_interval,
+                    )
 
     elapsed = time.monotonic() - started
     if resume_index:
@@ -443,6 +587,12 @@ def _parse_args():
         help="Timeout per page OCR (seconds).",
     )
     parser.add_argument(
+        "--page-workers",
+        type=int,
+        default=1,
+        help="Number of concurrent OCR workers per PDF.",
+    )
+    parser.add_argument(
         "--workers",
         type=int,
         default=1,
@@ -452,6 +602,12 @@ def _parse_args():
         "--ordered",
         action="store_true",
         help="Write output in input order (forces single worker).",
+    )
+    parser.add_argument(
+        "--progress-interval",
+        type=int,
+        default=0,
+        help="Print progress every N seconds (0 disables).",
     )
     return parser.parse_args()
 
@@ -470,8 +626,10 @@ def main():
         max_pages=args.max_pages,
         text_dir=args.text_dir,
         page_timeout=args.page_timeout,
+        page_workers=args.page_workers,
         workers=args.workers,
         ordered=args.ordered,
+        progress_interval=args.progress_interval,
     )
     _print_summary(summary)
 
