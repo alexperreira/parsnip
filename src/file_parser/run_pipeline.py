@@ -87,10 +87,21 @@ def main():
     manifest_path, phase1_path, phase2_path = _ensure_outputs(output_dir, args.resume)
     text_dir = _resolve_text_dir(args.text_dir, output_dir)
 
-    manifest_summary = build_manifest(args.input, manifest_path, resume=args.resume)
+    manifest_summary = build_manifest(
+        args.input,
+        manifest_path,
+        resume=args.resume,
+        progress_interval=args.progress_interval,
+    )
     _print_manifest_summary(manifest_summary)
 
-    phase1_summary = build_phase1(manifest_path, args.input, phase1_path, resume=args.resume)
+    phase1_summary = build_phase1(
+        manifest_path,
+        args.input,
+        phase1_path,
+        resume=args.resume,
+        progress_interval=args.progress_interval,
+    )
     _print_phase1_summary(phase1_summary)
 
     report_summary = summarize_phase1(phase1_path)

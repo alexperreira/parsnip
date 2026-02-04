@@ -191,7 +191,25 @@ def _parse_zip_virtual_path(virtual_path):
     return container_relpath, inner_path
 
 
-def build_phase1(manifest_path, input_path, output_path, resume=False, config=None):
+def _maybe_print_progress(processed, started, last_print, interval):
+    if interval <= 0:
+        return last_print
+    now = time.monotonic()
+    if now - last_print < interval:
+        return last_print
+    elapsed = round(now - started, 3)
+    print(f"Phase 1 progress: {processed} elapsed_seconds={elapsed}", flush=True)
+    return now
+
+
+def build_phase1(
+    manifest_path,
+    input_path,
+    output_path,
+    resume=False,
+    config=None,
+    progress_interval=0,
+):
     if config is None:
         config = DetectionConfig()
 
@@ -228,6 +246,8 @@ def build_phase1(manifest_path, input_path, output_path, resume=False, config=No
     counts_by_class = {"text": 0, "scanned": 0, "mixed": 0, "unknown": 0}
     started = time.monotonic()
     errors = 0
+    processed = 0
+    last_progress = started
 
     with manifest_path.open("r", encoding="utf-8") as manifest_handle:
         with output_path.open(output_mode, encoding="utf-8") as out_handle:
@@ -246,6 +266,13 @@ def build_phase1(manifest_path, input_path, output_path, resume=False, config=No
                     continue
                 if resume_index and not resume_index.add(file_id):
                     skipped += 1
+                    processed += 1
+                    last_progress = _maybe_print_progress(
+                        processed,
+                        started,
+                        last_progress,
+                        progress_interval,
+                    )
                     continue
 
                 source_type = record.get("source_type")
@@ -300,6 +327,13 @@ def build_phase1(manifest_path, input_path, output_path, resume=False, config=No
                 out_handle.write(json.dumps(output_record, ensure_ascii=True) + "\n")
                 written += 1
                 counts_by_class[output_record["classification"]] += 1
+                processed += 1
+                last_progress = _maybe_print_progress(
+                    processed,
+                    started,
+                    last_progress,
+                    progress_interval,
+                )
 
     elapsed = time.monotonic() - started
     if resume_index:
@@ -356,6 +390,12 @@ def _parse_args():
     parser.add_argument("--image-ratio-min", type=float, default=IMAGE_RATIO_MIN)
     parser.add_argument("--image-ratio-max-for-text", type=float, default=IMAGE_RATIO_MAX_FOR_TEXT)
     parser.add_argument("--low-text-ratio-min", type=float, default=LOW_TEXT_RATIO_MIN)
+    parser.add_argument(
+        "--progress-interval",
+        type=int,
+        default=0,
+        help="Print progress every N seconds (0 disables).",
+    )
     return parser.parse_args()
 
 
@@ -370,7 +410,14 @@ def main():
         low_text_ratio_min=args.low_text_ratio_min,
         max_sample_pages=args.max_sample_pages,
     )
-    summary = build_phase1(args.manifest, args.input, args.output, resume=args.resume, config=config)
+    summary = build_phase1(
+        args.manifest,
+        args.input,
+        args.output,
+        resume=args.resume,
+        config=config,
+        progress_interval=args.progress_interval,
+    )
     _print_summary(summary)
 
 

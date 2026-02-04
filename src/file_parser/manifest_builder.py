@@ -98,7 +98,18 @@ def _load_resume_index(output_path, resume_index):
     return skipped
 
 
-def build_manifest(input_path, output_path, resume=False):
+def _maybe_print_progress(processed, started, last_print, interval):
+    if interval <= 0:
+        return last_print
+    now = time.monotonic()
+    if now - last_print < interval:
+        return last_print
+    elapsed = round(now - started, 3)
+    print(f"Manifest progress: {processed} elapsed_seconds={elapsed}", flush=True)
+    return now
+
+
+def build_manifest(input_path, output_path, resume=False, progress_interval=0):
     root_path = Path(input_path).resolve()
     if not root_path.exists() or not root_path.is_dir():
         raise SystemExit("Input path must be an existing directory.")
@@ -128,6 +139,8 @@ def build_manifest(input_path, output_path, resume=False):
     counts_by_source = {"fs": 0, "zip": 0}
     errors = 0
     started = time.monotonic()
+    processed = 0
+    last_progress = started
 
     with output_path.open(output_mode, encoding="utf-8") as out_handle:
         for fs_path in _iter_fs_pdfs(root_path):
@@ -145,10 +158,24 @@ def build_manifest(input_path, output_path, resume=False):
                 }
                 if resume_index and not resume_index.add(record["file_id"]):
                     skipped += 1
+                    processed += 1
+                    last_progress = _maybe_print_progress(
+                        processed,
+                        started,
+                        last_progress,
+                        progress_interval,
+                    )
                     continue
                 out_handle.write(json.dumps(record, ensure_ascii=True) + "\n")
                 written += 1
                 counts_by_source["fs"] += 1
+                processed += 1
+                last_progress = _maybe_print_progress(
+                    processed,
+                    started,
+                    last_progress,
+                    progress_interval,
+                )
             except OSError:
                 errors += 1
 
@@ -172,10 +199,24 @@ def build_manifest(input_path, output_path, resume=False):
                         }
                         if resume_index and not resume_index.add(record["file_id"]):
                             skipped += 1
+                            processed += 1
+                            last_progress = _maybe_print_progress(
+                                processed,
+                                started,
+                                last_progress,
+                                progress_interval,
+                            )
                             continue
                         out_handle.write(json.dumps(record, ensure_ascii=True) + "\n")
                         written += 1
                         counts_by_source["zip"] += 1
+                        processed += 1
+                        last_progress = _maybe_print_progress(
+                            processed,
+                            started,
+                            last_progress,
+                            progress_interval,
+                        )
             except (OSError, zipfile.BadZipFile):
                 errors += 1
 
@@ -224,12 +265,23 @@ def _parse_args():
         action="store_true",
         help="Resume by skipping file_ids already in the output.",
     )
+    parser.add_argument(
+        "--progress-interval",
+        type=int,
+        default=0,
+        help="Print progress every N seconds (0 disables).",
+    )
     return parser.parse_args()
 
 
 def main():
     args = _parse_args()
-    summary = build_manifest(args.input, args.output, resume=args.resume)
+    summary = build_manifest(
+        args.input,
+        args.output,
+        resume=args.resume,
+        progress_interval=args.progress_interval,
+    )
     _print_summary(summary)
 
 

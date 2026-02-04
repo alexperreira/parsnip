@@ -33,6 +33,12 @@ Resume mode skips duplicates using `file_id`:
 PYTHONPATH=src python -m file_parser.manifest_builder --input /path/to/input --output output/manifest.jsonl --resume
 ```
 
+Print periodic progress:
+
+```bash
+PYTHONPATH=src python -m file_parser.manifest_builder --input /path/to/input --output output/manifest.jsonl --progress-interval 5
+```
+
 Output fields include `file_id`, `source_type`, `container_path`, `virtual_path`, `size_bytes`, `mtime`, and `ext`.
 
 ## Phase 1: PDF detection (no OCR)
@@ -47,6 +53,12 @@ Resume mode skips duplicates using `file_id`:
 
 ```bash
 PYTHONPATH=src python -m file_parser.phase1_detect --input /path/to/input --manifest output/manifest.jsonl --output output/phase1.jsonl --resume
+```
+
+Print periodic progress:
+
+```bash
+PYTHONPATH=src python -m file_parser.phase1_detect --input /path/to/input --manifest output/manifest.jsonl --output output/phase1.jsonl --progress-interval 5
 ```
 
 ### Defaults (deterministic)
