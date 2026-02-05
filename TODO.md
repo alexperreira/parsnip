@@ -7,23 +7,6 @@ Work through items **in order** unless explicitly told otherwise.
 
 ## Phase 3 — Unified Text Extraction (PRIORITY)
 
-### 3.1 Create a new module
-Add a new module:
-
-src/text_extraction/
-- phase3_extract_text.py
-
-This should:
-- Read phase1 detection output (JSONL).
-- For each file_id:
-  - If classification == "text":
-    - Extract text using pypdf page-by-page.
-  - If classification in ["scanned", "mixed", "unknown"]:
-    - Use existing OCR outputs from Phase 2.
-- Output a **single normalized record per PDF** with schema below.
-
----
-
 ### 3.2 Define canonical document schema (REQUIRED)
 
 Each output record must look like:
@@ -39,7 +22,9 @@ Each output record must look like:
       "page_index": int,
       "text": str,
       "source": "pdf_text" | "ocr",
-      "confidence": float | null
+      "confidence": float | null,
+      "review_required": bool,
+      "review_reason": "missing_text_path" | "unreadable_text_path" | null
     }
   ]
 }
@@ -49,6 +34,8 @@ Notes:
   - % pages with non-empty text
   - OCR confidence if available
 - If text extraction fails for a page, fallback to OCR for that page.
+- When Phase 2 uses `--text-dir`, OCR pages may only provide `text_path`. Phase 3 must read that file.
+- If the OCR `text_path` is missing or unreadable, set `review_required=true` and `review_reason`.
 
 ---
 
@@ -84,6 +71,18 @@ phase3_extract_text.py must:
 - Be restart-safe.
 
 ---
+
+## Completed
+
+### Phase 3.1 — Create module
+- Added `src/text_extraction/phase3_extract_text.py` with PDF text extraction for `text` classifications.
+- Uses Phase 2 OCR outputs for `scanned|mixed|unknown`.
+- Reads OCR `text_path` when `--text-dir` is used.
+- Labels pages with `review_required` + `review_reason` if OCR `text_path` is missing/unreadable.
+
+Notes:
+- Current Phase 3 output is a single JSONL file (no sharding yet).
+- No resume support yet.
 
 ## Phase 4 — Chunking for Analysis
 
