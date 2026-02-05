@@ -113,6 +113,8 @@ def _extract_pdf_text(record, root_path):
                         "text": text,
                         "source": "pdf_text",
                         "confidence": None,
+                        "review_required": False,
+                        "review_reason": None,
                     }
                 )
     except (PdfReadError, OSError, ValueError):
@@ -162,7 +164,18 @@ def _estimate_quality(pages):
     if not pages:
         return 0.0
     non_empty = sum(1 for page in pages if page.get("text"))
-    return round(non_empty / len(pages), 6)
+    text_ratio = non_empty / len(pages)
+    confidences = [
+        page.get("confidence")
+        for page in pages
+        if page.get("confidence") is not None
+    ]
+    if not confidences:
+        return round(text_ratio, 6)
+    avg_conf = sum(confidences) / len(confidences)
+    if avg_conf > 1:
+        avg_conf = 1.0
+    return round((text_ratio + avg_conf) / 2, 6)
 
 
 def build_phase3(input_path, phase1_path, output_path, phase2_path=None):
