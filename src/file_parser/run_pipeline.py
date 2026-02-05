@@ -27,6 +27,12 @@ def _parse_args():
         default=1,
         help="Number of concurrent OCR workers per PDF.",
     )
+    parser.add_argument(
+        "--skip-low-signal-bytes",
+        type=int,
+        default=0,
+        help="Skip OCR for pages with rendered PNG size <= N bytes (0 disables).",
+    )
     parser.add_argument("--max-pages", type=int, default=None, help="Max pages to OCR.")
     parser.add_argument(
         "--page-timeout",
@@ -120,6 +126,7 @@ def main():
         text_dir=text_dir,
         page_timeout=args.page_timeout,
         page_workers=args.page_workers,
+        skip_low_signal_bytes=args.skip_low_signal_bytes,
         workers=args.workers,
         ordered=args.ordered,
         progress_interval=args.progress_interval,

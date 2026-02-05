@@ -120,6 +120,12 @@ Parallelize OCR within each PDF (balance CPU/memory use):
 PYTHONPATH=src python -m file_parser.phase2_ocr --input /path/to/input --phase1 output/phase1.jsonl --output output/phase2_ocr.jsonl --page-workers 2
 ```
 
+Skip OCR for low-signal rendered pages (by PNG size in bytes):
+
+```bash
+PYTHONPATH=src python -m file_parser.phase2_ocr --input /path/to/input --phase1 output/phase1.jsonl --output output/phase2_ocr.jsonl --skip-low-signal-bytes 15000
+```
+
 Note: `page-workers` is capped based on CPU count and `--workers`, and a warning is printed if combined concurrency exceeds CPU count.
 
 Deterministic output order (forces single worker):

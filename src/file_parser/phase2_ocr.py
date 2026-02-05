@@ -195,6 +195,7 @@ def _ocr_with_tesseract(
     text_dir,
     page_timeout,
     page_workers,
+    skip_low_signal_bytes,
 ):
     if not _ensure_engine_dependencies():
         return _pending_record(record, classification, "MissingTesseractOrPdftoppm")
@@ -222,6 +223,19 @@ def _ocr_with_tesseract(
             try:
                 if not Path(image_path).is_file():
                     raise FileNotFoundError(image_path)
+                if skip_low_signal_bytes and skip_low_signal_bytes > 0:
+                    image_size = Path(image_path).stat().st_size
+                    if image_size <= skip_low_signal_bytes:
+                        return (
+                            page_index,
+                            {
+                                "page_index": page_index,
+                                "text": "",
+                                "confidence": None,
+                                "errors": "SkippedLowSignal",
+                            },
+                            None,
+                        )
                 ocr_cmd = [
                     "tesseract",
                     image_path,
@@ -363,6 +377,7 @@ def build_phase2(
     text_dir=None,
     page_timeout=120,
     page_workers=1,
+    skip_low_signal_bytes=0,
     workers=1,
     ordered=False,
     progress_interval=0,
@@ -442,6 +457,7 @@ def build_phase2(
             text_dir=text_dir,
             page_timeout=page_timeout,
             page_workers=page_workers,
+            skip_low_signal_bytes=skip_low_signal_bytes,
         )
 
     with output_path.open(output_mode, encoding="utf-8") as out_handle:
@@ -642,6 +658,12 @@ def _parse_args():
         help="Number of concurrent OCR workers per PDF.",
     )
     parser.add_argument(
+        "--skip-low-signal-bytes",
+        type=int,
+        default=0,
+        help="Skip OCR for pages with rendered PNG size <= N bytes (0 disables).",
+    )
+    parser.add_argument(
         "--workers",
         type=int,
         default=1,
@@ -676,6 +698,7 @@ def main():
         text_dir=args.text_dir,
         page_timeout=args.page_timeout,
         page_workers=args.page_workers,
+        skip_low_signal_bytes=args.skip_low_signal_bytes,
         workers=args.workers,
         ordered=args.ordered,
         progress_interval=args.progress_interval,
