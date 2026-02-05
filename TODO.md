@@ -7,38 +7,6 @@ Work through items **in order** unless explicitly told otherwise.
 
 ## Phase 3 — Unified Text Extraction (PRIORITY)
 
-### 3.2 Define canonical document schema (REQUIRED)
-
-Each output record must look like:
-
-{
-  "file_id": str,
-  "virtual_path": str,
-  "classification": "text|scanned|mixed|unknown",
-  "page_count": int,
-  "quality_score": float,
-  "pages": [
-    {
-      "page_index": int,
-      "text": str,
-      "source": "pdf_text" | "ocr",
-      "confidence": float | null,
-      "review_required": bool,
-      "review_reason": "missing_text_path" | "unreadable_text_path" | null
-    }
-  ]
-}
-
-Notes:
-- quality_score should roughly reflect:
-  - % pages with non-empty text
-  - OCR confidence if available
-- If text extraction fails for a page, fallback to OCR for that page.
-- When Phase 2 uses `--text-dir`, OCR pages may only provide `text_path`. Phase 3 must read that file.
-- If the OCR `text_path` is missing or unreadable, set `review_required=true` and `review_reason`.
-
----
-
 ### 3.3 Sharded + compressed outputs
 
 Instead of one giant file, write:
@@ -83,6 +51,13 @@ phase3_extract_text.py must:
 Notes:
 - Current Phase 3 output is a single JSONL file (no sharding yet).
 - No resume support yet.
+
+### Phase 3.2 — Define canonical document schema
+- Added `review_required` + `review_reason` to PDF-text pages so all page records match the canonical schema.
+- `quality_score` now combines non-empty text ratio with OCR confidence (when available).
+
+Notes:
+- OCR confidence is assumed to be in [0,1]; values above 1 are clamped to 1.0 before averaging.
 
 ## Phase 4 — Chunking for Analysis
 
