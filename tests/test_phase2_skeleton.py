@@ -158,6 +158,55 @@ class Phase2SkeletonTest(unittest.TestCase):
             output = buffer.getvalue()
             self.assertIn("exceeds CPU count", output)
 
+    def test_phase2_skips_low_signal_pages(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            pdf_path = root / "doc.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4\n%fake\n")
+            phase1_path = root / "phase1.jsonl"
+            phase1_path.write_text(
+                json.dumps(
+                    {
+                        "file_id": "a",
+                        "ext": "pdf",
+                        "classification": "scanned",
+                        "source_type": "fs",
+                        "virtual_path": "doc.pdf",
+                        "page_count": 1,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            output_path = root / "phase2.jsonl"
+
+            def _fake_render(temp_pdf, output_dir, dpi, start_page, end_page):
+                render_prefix = Path(output_dir) / "page"
+                for page_number in range(start_page, end_page + 1):
+                    image_path = f"{render_prefix}-{page_number}.png"
+                    Path(image_path).write_bytes(b"tiny")
+                return render_prefix
+
+            with mock.patch("file_parser.phase2_ocr._ensure_engine_dependencies", return_value=True):
+                with mock.patch("file_parser.phase2_ocr._render_pdf_page_range", side_effect=_fake_render):
+                    with mock.patch("file_parser.phase2_ocr.subprocess.run") as run_mock:
+                        summary = build_phase2(
+                            root,
+                            phase1_path,
+                            output_path,
+                            resume=False,
+                            engine="tesseract",
+                            page_workers=1,
+                            skip_low_signal_bytes=10,
+                        )
+                        self.assertEqual(summary["written"], 1)
+                        run_mock.assert_not_called()
+
+            output_records = [
+                json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(output_records[0]["pages"][0]["errors"], "SkippedLowSignal")
+
 
 if __name__ == "__main__":
     unittest.main()
