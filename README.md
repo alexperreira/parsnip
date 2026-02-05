@@ -19,6 +19,31 @@ Common flags:
 - `--text-dir output/ocr_text` to write per-page text files
 - `--progress-interval N` to print Phase 2 progress
 
+## Make targets (shortcuts)
+
+Run the pipeline with Make:
+
+```bash
+make all INPUT=/path/to/input
+```
+
+Available targets:
+
+- `make manifest`
+- `make phase1`
+- `make report`
+- `make phase2`
+- `make phase3`
+- `make test`
+- `make print-output`
+- `make clean`
+- `make clean-all`
+
+Variables you can override:
+
+- `INPUT` (default `/path/to/input`)
+- `OUT_DIR` (default `output`)
+
 ## Phase 0: Manifest builder (no content extraction)
 
 Build a JSONL manifest of PDFs on disk and PDFs inside zip files:

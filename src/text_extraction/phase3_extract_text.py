@@ -1,4 +1,5 @@
 import argparse
+import gzip
 import json
 import tempfile
 import zipfile
@@ -10,6 +11,7 @@ from pypdf.errors import PdfReadError
 
 TEXT_CLASSIFICATIONS = {"text"}
 OCR_CLASSIFICATIONS = {"scanned", "mixed", "unknown"}
+DEFAULT_SHARD_SIZE = 5000
 
 
 def _parse_zip_virtual_path(virtual_path):
@@ -178,7 +180,14 @@ def _estimate_quality(pages):
     return round((text_ratio + avg_conf) / 2, 6)
 
 
-def build_phase3(input_path, phase1_path, output_path, phase2_path=None):
+def _open_shard(output_dir, shard_index):
+    shard_name = f"docs_{shard_index:04d}.jsonl.gz"
+    shard_path = output_dir / shard_name
+    handle = gzip.open(shard_path, "wt", encoding="utf-8")
+    return shard_name, shard_path, handle
+
+
+def build_phase3(input_path, phase1_path, output_dir, phase2_path=None, shard_size=DEFAULT_SHARD_SIZE):
     root_path = Path(input_path).resolve()
     if not root_path.exists() or not root_path.is_dir():
         raise SystemExit("Input path must be an existing directory.")
@@ -187,15 +196,30 @@ def build_phase3(input_path, phase1_path, output_path, phase2_path=None):
     if not phase1_path.exists():
         raise SystemExit("Phase 1 path does not exist.")
 
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if shard_size is None:
+        raise SystemExit("Shard size must be provided.")
+    try:
+        shard_size = int(shard_size)
+    except (TypeError, ValueError):
+        raise SystemExit("Shard size must be an integer.")
+    if shard_size <= 0:
+        raise SystemExit("Shard size must be a positive integer.")
 
     phase2_index = _index_phase2(phase2_path)
 
     written = 0
     errors = 0
+    shard_index = 0
+    shard_written = 0
+    shard_start = 0
+    shard_handle = None
+    shard_name = None
+    manifest = []
 
-    with output_path.open("w", encoding="utf-8") as out_handle:
+    try:
         for record in _iter_phase1_records(phase1_path):
             if record.get("ext") != "pdf":
                 continue
@@ -225,6 +249,11 @@ def build_phase3(input_path, phase1_path, output_path, phase2_path=None):
                 else:
                     pages = _pages_from_ocr(phase2_record, page_count)
 
+            if shard_handle is None:
+                shard_index += 1
+                shard_start = written
+                shard_name, _, shard_handle = _open_shard(output_dir, shard_index)
+
             output_record = {
                 "file_id": file_id,
                 "virtual_path": record.get("virtual_path"),
@@ -233,8 +262,40 @@ def build_phase3(input_path, phase1_path, output_path, phase2_path=None):
                 "quality_score": _estimate_quality(pages),
                 "pages": pages,
             }
-            out_handle.write(json.dumps(output_record, ensure_ascii=True) + "\n")
+            shard_handle.write(json.dumps(output_record, ensure_ascii=True) + "\n")
             written += 1
+            shard_written += 1
+
+            if shard_written >= shard_size:
+                shard_handle.close()
+                manifest.append(
+                    {
+                        "shard": shard_name,
+                        "start_index": shard_start,
+                        "end_index": written - 1,
+                        "doc_count": shard_written,
+                    }
+                )
+                shard_handle = None
+                shard_name = None
+                shard_written = 0
+    finally:
+        if shard_handle is not None:
+            shard_handle.close()
+            manifest.append(
+                {
+                    "shard": shard_name,
+                    "start_index": shard_start,
+                    "end_index": written - 1,
+                    "doc_count": shard_written,
+                }
+            )
+
+    manifest_path = output_dir / "manifest.json"
+    manifest_payload = {"shard_size": shard_size, "shards": manifest}
+    with manifest_path.open("w", encoding="utf-8") as handle:
+        json.dump(manifest_payload, handle, ensure_ascii=True, indent=2)
+        handle.write("\n")
 
     summary = {"written": written, "errors": errors}
     return summary
@@ -246,20 +307,34 @@ def _parse_args():
     parser.add_argument("--phase1", required=True, help="Phase 1 JSONL path.")
     parser.add_argument("--phase2", default=None, help="Phase 2 OCR JSONL path.")
     parser.add_argument(
+        "--output-dir",
+        default="output/text",
+        help="Output directory for sharded JSONL.GZ files.",
+    )
+    parser.add_argument(
         "--output",
-        default="output/phase3_text.jsonl",
-        help="Output JSONL path.",
+        default=None,
+        help="Deprecated. Use --output-dir instead.",
+    )
+    parser.add_argument(
+        "--shard-size",
+        default=DEFAULT_SHARD_SIZE,
+        help="Documents per shard (default: 5000).",
     )
     return parser.parse_args()
 
 
 def main():
     args = _parse_args()
+    output_dir = args.output_dir
+    if args.output:
+        output_dir = args.output
     summary = build_phase3(
         args.input,
         args.phase1,
-        args.output,
+        output_dir,
         phase2_path=args.phase2,
+        shard_size=args.shard_size,
     )
     print("Phase 3 summary")
     print(f"  written: {summary['written']}")
