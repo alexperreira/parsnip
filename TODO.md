@@ -7,30 +7,6 @@ Work through items **in order** unless explicitly told otherwise.
 
 ## Phase 3 — Unified Text Extraction (PRIORITY)
 
-### 3.3 Sharded + compressed outputs
-
-Instead of one giant file, write:
-
-output/text/docs_0001.jsonl.gz  
-output/text/docs_0002.jsonl.gz  
-...
-
-Rules:
-- Shard by 5,000 documents per file.
-- Use gzip compression.
-- Maintain a small manifest file:
-  output/text/manifest.json
-
-Example manifest entry:
-{
-  "shard": "docs_0001.jsonl.gz",
-  "start_index": 0,
-  "end_index": 4999,
-  "doc_count": 5000
-}
-
----
-
 ### 3.4 Resume behavior
 
 phase3_extract_text.py must:
@@ -41,6 +17,15 @@ phase3_extract_text.py must:
 ---
 
 ## Completed
+
+### 3.3 Sharded + compressed outputs
+
+Notes:
+- Sharded output uses gzip-compressed JSONL files (`docs_0001.jsonl.gz`, etc.).
+- Shard size is configurable via `--shard-size` (default 5000).
+- `output/text/manifest.json` now stores an object with `shard_size` and `shards`.
+- Deprecated `--output` is supported as an alias for `--output-dir`.
+- Added Make targets for phases and cleanup; documented in README.
 
 ### Phase 3.1 — Create module
 - Added `src/text_extraction/phase3_extract_text.py` with PDF text extraction for `text` classifications.
