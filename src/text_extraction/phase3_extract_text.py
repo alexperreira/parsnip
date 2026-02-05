@@ -127,6 +127,8 @@ def _pages_from_ocr(phase2_record, page_count):
         text = ""
         confidence = None
         source = "ocr"
+        review_required = False
+        review_reason = None
         if page_index < len(ocr_pages):
             page = ocr_pages[page_index] or {}
             text = page.get("text", "") or ""
@@ -137,6 +139,11 @@ def _pages_from_ocr(phase2_record, page_count):
                         text = Path(text_path).read_text(encoding="utf-8")
                     except OSError:
                         text = ""
+                        review_required = True
+                        review_reason = "unreadable_text_path"
+                else:
+                    review_required = True
+                    review_reason = "missing_text_path"
             confidence = page.get("confidence")
         pages.append(
             {
@@ -144,6 +151,8 @@ def _pages_from_ocr(phase2_record, page_count):
                 "text": text,
                 "source": source,
                 "confidence": confidence,
+                "review_required": review_required,
+                "review_reason": review_reason,
             }
         )
     return pages
