@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parsnip-file-parser"
+version = "0.1.0"
+description = "Python-first file parsing pipeline with a deterministic two-phase approach."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "Parsnip Contributors" }]
+dependencies = ["pypdf>=4.0.0"]
+
+[project.scripts]
+fileparse = "file_parser.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
