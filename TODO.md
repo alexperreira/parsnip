@@ -7,16 +7,16 @@ Work through items **in order** unless explicitly told otherwise.
 
 ## Phase 3 — Unified Text Extraction (PRIORITY)
 
+---
+
+## Completed
+
 ### 3.4 Resume behavior
 
 phase3_extract_text.py must:
 - Support --resume
 - Track processed file_ids in a SQLite DB (similar to earlier phases).
 - Be restart-safe.
-
----
-
-## Completed
 
 ### 3.3 Sharded + compressed outputs
 
