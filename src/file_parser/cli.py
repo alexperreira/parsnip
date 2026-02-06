@@ -1,5 +1,6 @@
-import argparse
 import sys
+
+import typer
 
 from file_parser.manifest_builder import main as manifest_main
 from file_parser.phase1_detect import main as phase1_main
@@ -8,44 +9,64 @@ from file_parser.phase2_ocr import main as phase2_main
 from file_parser.run_pipeline import main as pipeline_main
 from text_extraction.phase3_extract_text import main as phase3_main
 
-
-def _parse_args(argv=None):
-    parser = argparse.ArgumentParser(
-        prog="fileparse",
-        description="File parsing pipeline CLI.",
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    subparsers.add_parser("pipeline", help="Run Phase 0-2 end-to-end.")
-    subparsers.add_parser("manifest", help="Build a PDF manifest (Phase 0).")
-    subparsers.add_parser("phase1", help="Classify PDFs as text/scanned/mixed/unknown.")
-    subparsers.add_parser("report", help="Summarize Phase 1 results.")
-    subparsers.add_parser("phase2", help="Run OCR for scanned/mixed PDFs.")
-    subparsers.add_parser("phase3", help="Run unified text extraction.")
-
-    return parser.parse_known_args(argv)
+app = typer.Typer(
+    add_completion=False,
+    help="File parsing pipeline CLI.",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
 
 
-def main(argv=None):
-    args, remainder = _parse_args(argv)
-    dispatch = {
-        "pipeline": pipeline_main,
-        "manifest": manifest_main,
-        "phase1": phase1_main,
-        "report": report_main,
-        "phase2": phase2_main,
-        "phase3": phase3_main,
-    }
-    handler = dispatch.get(args.command)
-    if handler is None:
-        raise SystemExit(f"Unknown command: {args.command}")
-
+def _dispatch_to_main(command: str, remainder, handler):
     prior_argv = sys.argv
-    sys.argv = [f"fileparse {args.command}", *remainder]
+    sys.argv = [f"fileparse {command}", *remainder]
     try:
         return handler()
     finally:
         sys.argv = prior_argv
+
+
+@app.command("pipeline", help="Run Phase 0-2 end-to-end.")
+def pipeline(ctx: typer.Context):
+    _dispatch_to_main("pipeline", list(ctx.args), pipeline_main)
+
+
+@app.command("manifest", help="Build a PDF manifest (Phase 0).")
+def manifest(ctx: typer.Context):
+    _dispatch_to_main("manifest", list(ctx.args), manifest_main)
+
+
+@app.command("phase1", help="Classify PDFs as text/scanned/mixed/unknown.")
+def phase1(ctx: typer.Context):
+    _dispatch_to_main("phase1", list(ctx.args), phase1_main)
+
+
+@app.command("report", help="Summarize Phase 1 results.")
+def report(ctx: typer.Context):
+    _dispatch_to_main("report", list(ctx.args), report_main)
+
+
+@app.command("phase2", help="Run OCR for scanned/mixed PDFs.")
+def phase2(ctx: typer.Context):
+    _dispatch_to_main("phase2", list(ctx.args), phase2_main)
+
+
+@app.command("extract-text", help="Run unified text extraction (Phase 3).")
+def extract_text(ctx: typer.Context):
+    _dispatch_to_main("extract-text", list(ctx.args), phase3_main)
+
+
+@app.command("chunk", help="Placeholder for future Phase 4 chunking script.")
+def chunk():
+    raise typer.BadParameter("Phase 4 chunking is not implemented yet.")
+
+
+@app.command("validate", help="Placeholder for future Phase 7 validation script.")
+def validate():
+    raise typer.BadParameter("Phase 7 validation is not implemented yet.")
+
+
+def main():
+    app()
 
 
 if __name__ == "__main__":
