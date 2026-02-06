@@ -4,20 +4,24 @@
 - Be explicit and minimal. Prefer the smallest change that solves the task.
 - Do not refactor broadly unless asked. No architecture redesigns unless requested.
 
-## Before editing
-- Briefly state your plan (2–6 bullets).
-- If the task is ambiguous, ask ONE question OR make the safest assumption and state it clearly.
+## Before editing (mandatory)
+For every request, first:
+1) State a 2–6 bullet plan.
+2) List the files you expect to touch.
+3) If anything is ambiguous, ask ONE clarifying question OR state your safest assumption.
 
 ## While editing
 - Keep changes scoped.
 - Avoid introducing new dependencies unless necessary; explain why if you add any.
 - Prefer clear code over clever code. Avoid hidden "magic" behavior.
+- Favor determinism over heuristics.
 
-## Safety rules (must follow)
-- Do not create/switch branches unless the user explicitly asks.
-- Do not commit unless the user explicitly asks.
-- Do not push unless the user explicitly asks.
-- Do not create duplicate *_v2 / *_new files.
+## Git safety (non-negotiable)
+- Do not create or switch branches unless explicitly asked.
+- Do not commit unless explicitly asked.
+- Do not push unless explicitly asked.
+- Never amend commits without explicit approval.
+- Never run destructive git operations (e.g., git reset --hard, git restore) unless explicitly instructed.
 
 ## Output format after code changes
 End your response with:
