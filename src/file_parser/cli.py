@@ -7,6 +7,7 @@ from file_parser.phase1_detect import main as phase1_main
 from file_parser.phase1_report import main as report_main
 from file_parser.phase2_ocr import main as phase2_main
 from file_parser.run_pipeline import main as pipeline_main
+from chunking.phase4_chunk import main as phase4_main
 from text_extraction.phase3_extract_text import main as phase3_main
 
 app = typer.Typer(
@@ -55,9 +56,9 @@ def extract_text(ctx: typer.Context):
     _dispatch_to_main("extract-text", list(ctx.args), phase3_main)
 
 
-@app.command("chunk", help="Placeholder for future Phase 4 chunking script.")
-def chunk():
-    raise typer.BadParameter("Phase 4 chunking is not implemented yet.")
+@app.command("chunk", help="Run Phase 4 chunking for analysis.")
+def chunk(ctx: typer.Context):
+    _dispatch_to_main("chunk", list(ctx.args), phase4_main)
 
 
 @app.command("validate", help="Placeholder for future Phase 7 validation script.")
