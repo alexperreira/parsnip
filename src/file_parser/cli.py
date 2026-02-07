@@ -7,6 +7,9 @@ from file_parser.phase1_detect import main as phase1_main
 from file_parser.phase1_report import main as report_main
 from file_parser.phase2_ocr import main as phase2_main
 from file_parser.run_pipeline import main as pipeline_main
+from llm.extract_conversations import main as llm_conversations_main
+from llm.extract_entities import main as llm_entities_main
+from llm.extract_events import main as llm_events_main
 from text_extraction.phase3_extract_text import main as phase3_main
 
 app = typer.Typer(
@@ -23,6 +26,14 @@ def _dispatch_to_main(command: str, remainder, handler):
         return handler()
     finally:
         sys.argv = prior_argv
+
+
+llm_app = typer.Typer(
+    add_completion=False,
+    help="LLM extraction commands.",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+app.add_typer(llm_app, name="llm")
 
 
 @app.command("pipeline", help="Run Phase 0-2 end-to-end.")
@@ -53,6 +64,21 @@ def phase2(ctx: typer.Context):
 @app.command("extract-text", help="Run unified text extraction (Phase 3).")
 def extract_text(ctx: typer.Context):
     _dispatch_to_main("extract-text", list(ctx.args), phase3_main)
+
+
+@llm_app.command("entities", help="Extract entities from chunks.jsonl via LLM.")
+def llm_entities(ctx: typer.Context):
+    _dispatch_to_main("llm entities", list(ctx.args), llm_entities_main)
+
+
+@llm_app.command("events", help="Extract events from chunks.jsonl via LLM.")
+def llm_events(ctx: typer.Context):
+    _dispatch_to_main("llm events", list(ctx.args), llm_events_main)
+
+
+@llm_app.command("conversations", help="Extract conversations from chunks.jsonl via LLM.")
+def llm_conversations(ctx: typer.Context):
+    _dispatch_to_main("llm conversations", list(ctx.args), llm_conversations_main)
 
 
 @app.command("chunk", help="Placeholder for future Phase 4 chunking script.")
