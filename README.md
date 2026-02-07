@@ -169,3 +169,44 @@ PYTHONPATH=src python -m file_parser.phase2_ocr --input /path/to/input --phase1 
 
 - Phase 0: Python standard library only
 - Phase 1: `pypdf` (see `requirements.txt`)
+
+## Phase 6: SQLite loaders
+
+Load one output type at a time:
+
+```bash
+PYTHONPATH=src python -m loaders.load_entities --input output/entities.jsonl --db output/store.sqlite
+PYTHONPATH=src python -m loaders.load_events --input output/events.jsonl --db output/store.sqlite
+PYTHONPATH=src python -m loaders.load_conversations --input output/conversations.jsonl --db output/store.sqlite
+```
+
+Load all three through the CLI:
+
+```bash
+PYTHONPATH=src python -m file_parser.cli load all \
+  --entities-input output/entities.jsonl \
+  --events-input output/events.jsonl \
+  --conversations-input output/conversations.jsonl \
+  --db output/store.sqlite
+```
+
+Reset and rebuild store tables before loading:
+
+```bash
+PYTHONPATH=src python -m file_parser.cli load all --overwrite
+```
+
+Inspect the database quickly:
+
+```bash
+sqlite3 output/store.sqlite "SELECT COUNT(*) FROM entities;"
+sqlite3 output/store.sqlite "SELECT COUNT(*) FROM events;"
+sqlite3 output/store.sqlite "SELECT COUNT(*) FROM conversations;"
+sqlite3 output/store.sqlite "SELECT COUNT(*) FROM mentions;"
+```
+
+### Loader troubleshooting
+
+- Malformed JSONL lines are skipped and counted under `json_decode_errors`.
+- Records missing `file_id`, `chunk_id`, or list-shaped `items` are skipped as `invalid_record_shape`.
+- Re-running loaders with the same inputs is idempotent (`INSERT OR IGNORE` on unique keys).

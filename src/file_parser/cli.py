@@ -48,6 +48,29 @@ load_app = typer.Typer(
 app.add_typer(load_app, name="load")
 
 
+def _run_load_stage(
+    entities_path: Path,
+    events_path: Path,
+    conversations_path: Path,
+    db_path: Path,
+    overwrite: bool = False,
+):
+    entity_args = ["--input", str(entities_path), "--db", str(db_path)]
+    if overwrite:
+        entity_args.append("--overwrite")
+    _dispatch_to_main("load entities", entity_args, load_entities_main)
+    _dispatch_to_main(
+        "load events",
+        ["--input", str(events_path), "--db", str(db_path)],
+        load_events_main,
+    )
+    _dispatch_to_main(
+        "load conversations",
+        ["--input", str(conversations_path), "--db", str(db_path)],
+        load_conversations_main,
+    )
+
+
 @app.command("pipeline", help="Run Phase 0-2 end-to-end.")
 def pipeline(ctx: typer.Context):
     _dispatch_to_main("pipeline", list(ctx.args), pipeline_main)
@@ -106,6 +129,43 @@ def load_events(ctx: typer.Context):
 @load_app.command("conversations", help="Load conversations JSONL into SQLite.")
 def load_conversations(ctx: typer.Context):
     _dispatch_to_main("load conversations", list(ctx.args), load_conversations_main)
+
+
+@load_app.command("all", help="Load entities, events, and conversations into SQLite.")
+def load_all(
+    entities_input: str = typer.Option(
+        "entities.jsonl",
+        "--entities-input",
+        help="Entities JSONL path (default: entities.jsonl).",
+    ),
+    events_input: str = typer.Option(
+        "events.jsonl",
+        "--events-input",
+        help="Events JSONL path (default: events.jsonl).",
+    ),
+    conversations_input: str = typer.Option(
+        "conversations.jsonl",
+        "--conversations-input",
+        help="Conversations JSONL path (default: conversations.jsonl).",
+    ),
+    db: str = typer.Option(
+        "output/store.sqlite",
+        "--db",
+        help="SQLite DB path (default: output/store.sqlite).",
+    ),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Drop and recreate all store tables before loading.",
+    ),
+):
+    _run_load_stage(
+        Path(entities_input),
+        Path(events_input),
+        Path(conversations_input),
+        Path(db),
+        overwrite=overwrite,
+    )
 
 
 @app.command("chunk", help="Run Phase 4 chunking for analysis.")
@@ -187,20 +247,12 @@ def run(
             llm_conversations_main,
         )
     if "load" in selected:
-        _dispatch_to_main(
-            "load entities",
-            ["--input", str(entities_path), "--db", str(db_path)],
-            load_entities_main,
-        )
-        _dispatch_to_main(
-            "load events",
-            ["--input", str(events_path), "--db", str(db_path)],
-            load_events_main,
-        )
-        _dispatch_to_main(
-            "load conversations",
-            ["--input", str(conversations_path), "--db", str(db_path)],
-            load_conversations_main,
+        _run_load_stage(
+            entities_path,
+            events_path,
+            conversations_path,
+            db_path,
+            overwrite=False,
         )
     if "validate" in selected:
         raise typer.BadParameter("Phase 7 validation is not implemented yet.")

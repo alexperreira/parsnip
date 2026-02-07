@@ -1,8 +1,17 @@
 import argparse
 import json
-import sqlite3
 import time
 from pathlib import Path
+
+from loaders.store import (
+    as_clean_text,
+    as_float,
+    canonical_quote,
+    connect_db,
+    ensure_schema,
+    mark_loader_run,
+    normalize_page_range,
+)
 
 
 def _parse_args():
@@ -20,96 +29,104 @@ def _parse_args():
     parser.add_argument(
         "--overwrite",
         action="store_true",
-        help="Drop and recreate events table.",
+        help="Drop and recreate all store tables before loading.",
     )
     return parser.parse_args()
 
 
-def _ensure_schema(conn, overwrite):
-    if overwrite:
-        conn.execute("DROP TABLE IF EXISTS events")
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS events ("
-        "event_id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "event TEXT,"
-        "date TEXT,"
-        "confidence REAL,"
-        "file_id TEXT,"
-        "chunk_id TEXT,"
-        "page_start INTEGER,"
-        "page_end INTEGER,"
-        "quote TEXT"
-        ")"
-    )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_file_id ON events(file_id)")
-    conn.commit()
+def build_load_events(input_path, db_path, overwrite=False):
+    input_path = Path(input_path)
+    if not input_path.exists():
+        raise SystemExit(f"Input not found: {input_path}")
+    conn = connect_db(db_path)
+    ensure_schema(conn, overwrite=overwrite)
 
+    summary = {
+        "records_total": 0,
+        "rows_attempted": 0,
+        "rows_inserted": 0,
+        "rows_skipped": 0,
+        "json_decode_errors": 0,
+        "invalid_record_shape": 0,
+        "invalid_item_shape": 0,
+    }
+    started = time.monotonic()
 
-def _iter_jsonl(path):
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
+    with input_path.open("r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
             if not line:
                 continue
+            summary["records_total"] += 1
             try:
                 record = json.loads(line)
             except json.JSONDecodeError:
+                summary["json_decode_errors"] += 1
                 continue
-            yield record
 
-
-def main():
-    args = _parse_args()
-    input_path = Path(args.input)
-    if not input_path.exists():
-        raise SystemExit(f"Input not found: {input_path}")
-    db_path = Path(args.db)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-
-    conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA journal_mode=WAL")
-    _ensure_schema(conn, args.overwrite)
-
-    inserted = 0
-    errors = 0
-    started = time.monotonic()
-
-    for record in _iter_jsonl(input_path):
-        file_id = record.get("file_id")
-        chunk_id = record.get("chunk_id")
-        page_range = record.get("page_range") or []
-        page_start = page_range[0] if len(page_range) > 0 else None
-        page_end = page_range[1] if len(page_range) > 1 else None
-        items = record.get("items") or []
-        if not isinstance(items, list):
-            errors += 1
-            continue
-        for item in items:
-            if not isinstance(item, dict):
+            if not isinstance(record, dict):
+                summary["invalid_record_shape"] += 1
                 continue
-            conn.execute(
-                "INSERT INTO events(event, date, confidence, file_id, chunk_id, page_start, page_end, quote) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    item.get("event"),
-                    item.get("date"),
-                    item.get("confidence"),
+            file_id = as_clean_text(record.get("file_id"))
+            chunk_id = as_clean_text(record.get("chunk_id"))
+            items = record.get("items")
+            if not file_id or not chunk_id or not isinstance(items, list):
+                summary["invalid_record_shape"] += 1
+                continue
+
+            page_start, page_end = normalize_page_range(record.get("page_range"))
+            for item in items:
+                summary["rows_attempted"] += 1
+                if not isinstance(item, dict):
+                    summary["invalid_item_shape"] += 1
+                    summary["rows_skipped"] += 1
+                    continue
+                event_name = as_clean_text(item.get("event"))
+                if not event_name:
+                    summary["invalid_item_shape"] += 1
+                    summary["rows_skipped"] += 1
+                    continue
+
+                row = (
+                    event_name,
+                    as_clean_text(item.get("date")),
+                    as_float(item.get("confidence")),
                     file_id,
                     chunk_id,
                     page_start,
                     page_end,
-                    item.get("quote"),
-                ),
-            )
-            inserted += 1
+                    canonical_quote(item.get("quote")),
+                )
+                result = conn.execute(
+                    "INSERT OR IGNORE INTO events("
+                    "event, date, confidence, file_id, chunk_id, page_start, page_end, quote"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    row,
+                )
+                if result.rowcount == 1:
+                    summary["rows_inserted"] += 1
+                else:
+                    summary["rows_skipped"] += 1
+
+    mark_loader_run(conn, "events")
     conn.commit()
     conn.close()
+    summary["elapsed_seconds"] = round(time.monotonic() - started, 3)
+    return summary
 
-    elapsed = round(time.monotonic() - started, 3)
+
+def main():
+    args = _parse_args()
+    summary = build_load_events(args.input, args.db, overwrite=args.overwrite)
     print("Load events summary")
-    print(f"  inserted: {inserted}")
-    print(f"  errors: {errors}")
-    print(f"  elapsed_seconds: {elapsed}")
+    print(f"  records_total: {summary['records_total']}")
+    print(f"  rows_attempted: {summary['rows_attempted']}")
+    print(f"  rows_inserted: {summary['rows_inserted']}")
+    print(f"  rows_skipped: {summary['rows_skipped']}")
+    print(f"  json_decode_errors: {summary['json_decode_errors']}")
+    print(f"  invalid_record_shape: {summary['invalid_record_shape']}")
+    print(f"  invalid_item_shape: {summary['invalid_item_shape']}")
+    print(f"  elapsed_seconds: {summary['elapsed_seconds']}")
 
 
 if __name__ == "__main__":
