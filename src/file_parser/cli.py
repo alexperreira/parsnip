@@ -7,6 +7,7 @@ from file_parser.manifest_builder import main as manifest_main
 from file_parser.phase1_detect import main as phase1_main
 from file_parser.phase1_report import main as report_main
 from file_parser.phase2_ocr import main as phase2_main
+from file_parser.phase7_validate import main as phase7_main
 from file_parser.run_pipeline import main as pipeline_main
 from chunking.phase4_chunk import main as phase4_main
 from llm.extract_conversations import main as llm_conversations_main
@@ -173,9 +174,9 @@ def chunk(ctx: typer.Context):
     _dispatch_to_main("chunk", list(ctx.args), phase4_main)
 
 
-@app.command("validate", help="Placeholder for future Phase 7 validation script.")
-def validate():
-    raise typer.BadParameter("Phase 7 validation is not implemented yet.")
+@app.command("validate", help="Run Phase 7 sanity checks.")
+def validate(ctx: typer.Context):
+    _dispatch_to_main("validate", list(ctx.args), phase7_main)
 
 
 @app.command("run", help="Run extract-text, chunk, llm, load, and validate steps.")
@@ -184,7 +185,7 @@ def run(
     input_dir: str = typer.Option(..., "--input", help="Input root or Phase 3 output dir."),
     output_dir: str = typer.Option("output", "--output", help="Output directory."),
     steps: str = typer.Option(
-        "extract-text,chunk,llm,load",
+        "extract-text,chunk,llm,load,validate",
         "--steps",
         help="Comma-separated steps: extract-text,chunk,llm,load,validate.",
     ),
@@ -255,7 +256,22 @@ def run(
             overwrite=False,
         )
     if "validate" in selected:
-        raise typer.BadParameter("Phase 7 validation is not implemented yet.")
+        _dispatch_to_main(
+            "validate",
+            [
+                "--chunks",
+                str(chunks_path),
+                "--entities",
+                str(entities_path),
+                "--events",
+                str(events_path),
+                "--conversations",
+                str(conversations_path),
+                "--phase3",
+                str(text_output_dir),
+            ],
+            phase7_main,
+        )
 
 
 def main():

@@ -46,6 +46,22 @@ Work through items **in order** unless explicitly told otherwise.
   - `tests/test_cli_load_help.py`
 - README updated with Phase 6 usage and troubleshooting.
 
+## Phase 7 — Sanity Checks
+
+- Added `src/file_parser/phase7_validate.py` with deterministic validation metrics:
+  - % chunks yielding at least one entity
+  - % chunks yielding at least one event
+  - rate of invalid JSON from LLM outputs
+  - rate of empty text pages from Phase 3 shards
+- Added integrity warnings for chunk/output count mismatches:
+  - warns when entities record count differs from total chunk count
+  - warns when events record count differs from total chunk count
+- Added `fileparse validate` command wiring in `src/file_parser/cli.py`.
+- Updated `fileparse run` default steps to include `validate`.
+- Added coverage:
+  - `tests/test_phase7_validate.py`
+  - `tests/test_cli_validate_help.py`
+
 ### 3.4 Resume behavior
 
 phase3_extract_text.py must:
@@ -81,15 +97,10 @@ Notes:
 
 ---
 
-## Phase 7 — Sanity Checks
+## Deferred follow-ups
 
-Add a validation script that reports:
-- % chunks yielding at least one entity
-- % chunks yielding at least one event
-- rate of invalid JSON from LLM
-- rate of empty text pages
-
-Note: `fileparse run` currently skips `validate` by default; update default steps when Phase 7 exists.
+- Improve CLI passthrough help for `fileparse validate` so validator-specific flags appear in command help output.
+- Consider an alternate invalid JSON rate denominator that includes malformed JSONL lines as an explicit mode.
 
 ---
 

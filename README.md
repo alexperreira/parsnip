@@ -210,3 +210,35 @@ sqlite3 output/store.sqlite "SELECT COUNT(*) FROM mentions;"
 - Malformed JSONL lines are skipped and counted under `json_decode_errors`.
 - Records missing `file_id`, `chunk_id`, or list-shaped `items` are skipped as `invalid_record_shape`.
 - Re-running loaders with the same inputs is idempotent (`INSERT OR IGNORE` on unique keys).
+
+## Phase 7: Validation sanity checks
+
+Run validation after chunking + LLM extraction:
+
+```bash
+PYTHONPATH=src python -m file_parser.cli validate \
+  --chunks output/text/chunks.jsonl \
+  --entities output/entities.jsonl \
+  --events output/events.jsonl \
+  --conversations output/conversations.jsonl \
+  --phase3 output/text
+```
+
+Metrics reported:
+
+- chunk entity yield: `% chunks with at least one entity item`
+- chunk event yield: `% chunks with at least one event item`
+- LLM invalid JSON rate: `% records with error=invalid_json`
+- empty text page rate: `% Phase 3 pages where text is empty/whitespace`
+
+`fileparse run` now includes `validate` in default steps:
+
+```bash
+PYTHONPATH=src python -m file_parser.cli run --input /path/to/input --output output
+```
+
+You can still override steps explicitly:
+
+```bash
+PYTHONPATH=src python -m file_parser.cli run --input /path/to/input --steps extract-text,chunk,llm,load
+```
