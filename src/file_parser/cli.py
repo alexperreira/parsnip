@@ -124,7 +124,7 @@ def run(
     input_dir: str = typer.Option(..., "--input", help="Input root or Phase 3 output dir."),
     output_dir: str = typer.Option("output", "--output", help="Output directory."),
     steps: str = typer.Option(
-        "extract-text,chunk,llm,load,validate",
+        "extract-text,chunk,llm,load",
         "--steps",
         help="Comma-separated steps: extract-text,chunk,llm,load,validate.",
     ),

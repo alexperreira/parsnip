@@ -82,6 +82,8 @@ Add a validation script that reports:
 - rate of invalid JSON from LLM
 - rate of empty text pages
 
+Note: `fileparse run` currently skips `validate` by default; update default steps when Phase 7 exists.
+
 ---
 
 ## Definition of Done for Immediate Phase
