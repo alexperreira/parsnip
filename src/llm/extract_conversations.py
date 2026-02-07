@@ -17,6 +17,16 @@ def _parse_args():
         default="conversations.jsonl",
         help="Output JSONL path (default: conversations.jsonl).",
     )
+    parser.add_argument(
+        "--signals",
+        action="store_true",
+        help="Use fast signals model defaults (llama3.1:8b).",
+    )
+    parser.add_argument(
+        "--narrative",
+        action="store_true",
+        help="Use narrative model defaults (qwen2.5:32b).",
+    )
     parser.add_argument("--model", default="llama3", help="Ollama model name.")
     parser.add_argument(
         "--host",
@@ -36,6 +46,18 @@ def _parse_args():
         help="Optional limit on chunks processed.",
     )
     return parser.parse_args()
+
+
+def _resolve_model(args):
+    if args.signals and args.narrative:
+        raise SystemExit("Choose only one of --signals or --narrative.")
+    if args.model != "llama3":
+        return args.model
+    if args.signals:
+        return "llama3.1:8b"
+    if args.narrative:
+        return "qwen2.5:32b"
+    return args.model
 
 
 def _build_prompt(text):
@@ -78,6 +100,7 @@ def _parse_response(text):
 
 def main():
     args = _parse_args()
+    model = _resolve_model(args)
     processed = 0
     errors = 0
     started = time.monotonic()
@@ -102,7 +125,7 @@ def main():
             error = None
             items = []
             try:
-                response_text = _call_ollama(prompt, args.model, args.host, args.timeout)
+                response_text = _call_ollama(prompt, model, args.host, args.timeout)
                 items, error = _parse_response(response_text)
                 if error:
                     errors += 1
@@ -119,7 +142,7 @@ def main():
                 "chunk_id": record.get("chunk_id"),
                 "page_range": [record.get("page_start"), record.get("page_end")],
                 "items": items,
-                "model": args.model,
+                "model": model,
                 "error": error,
             }
             out_handle.write(json.dumps(output_record, ensure_ascii=True) + "\n")
