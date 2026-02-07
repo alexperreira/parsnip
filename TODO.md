@@ -17,6 +17,16 @@ Work through items **in order** unless explicitly told otherwise.
 - Default chunk size is 2 pages with 1-page overlap; dialogue pages force single-page chunks.
 - Supports `--overwrite`, `--append` (SQLite-backed dedupe), and `--replace-file-ids`.
 
+## Phase 5 — LLM Extraction (MVP)
+
+- Added `src/llm/` with `extract_entities.py`, `extract_events.py`, `extract_conversations.py`.
+- Reads `chunks.jsonl`, calls a local LLM (Ollama by default), and writes strict JSONL outputs.
+- Output records include:
+  - `file_id`, `chunk_id`, `page_range`
+  - `items` list with per-item evidence: `quote` + `confidence`.
+- Supports `--signals` (defaults to `llama3.1:8b`) and `--narrative` (defaults to `qwen2.5:32b`),
+  with `--model` as an override.
+
 ### 3.4 Resume behavior
 
 phase3_extract_text.py must:
@@ -49,38 +59,6 @@ Notes:
 
 Notes:
 - OCR confidence is assumed to be in [0,1]; values above 1 are clamped to 1.0 before averaging.
-
-## Phase 5 — LLM Extraction (MVP)
-
-Create a new folder:
-
-src/llm/
-
-Add three scripts (initial minimal versions):
-
-1) extract_entities.py  
-2) extract_events.py  
-3) extract_conversations.py  
-
-Each script should:
-- Read chunks.jsonl
-- Call a locally hosted LLM (Ollama, llama.cpp, or vLLM — user choice)
-- Output strict JSONL:
-  - entities.jsonl
-  - events.jsonl
-  - conversations.jsonl
-
-Every record **must include evidence**:
-
-{
-  "file_id": "...",
-  "chunk_id": "...",
-  "page_range": [x, y],
-  "quote": "short supporting text",
-  "confidence": float
-}
-
----
 
 ## Phase 6 — Minimal Storage Layer
 
