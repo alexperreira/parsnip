@@ -7,6 +7,7 @@ from file_parser.phase1_detect import main as phase1_main
 from file_parser.phase1_report import main as report_main
 from file_parser.phase2_ocr import main as phase2_main
 from file_parser.run_pipeline import main as pipeline_main
+from chunking.phase4_chunk import main as phase4_main
 from llm.extract_conversations import main as llm_conversations_main
 from llm.extract_entities import main as llm_entities_main
 from llm.extract_events import main as llm_events_main
@@ -81,9 +82,9 @@ def llm_conversations(ctx: typer.Context):
     _dispatch_to_main("llm conversations", list(ctx.args), llm_conversations_main)
 
 
-@app.command("chunk", help="Placeholder for future Phase 4 chunking script.")
-def chunk():
-    raise typer.BadParameter("Phase 4 chunking is not implemented yet.")
+@app.command("chunk", help="Run Phase 4 chunking for analysis.")
+def chunk(ctx: typer.Context):
+    _dispatch_to_main("chunk", list(ctx.args), phase4_main)
 
 
 @app.command("validate", help="Placeholder for future Phase 7 validation script.")

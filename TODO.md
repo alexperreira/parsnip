@@ -7,16 +7,22 @@ Work through items **in order** unless explicitly told otherwise.
 
 ## Phase 3 — Unified Text Extraction (PRIORITY)
 
+---
+
+## Completed
+
+## Phase 4 — Chunking for Analysis
+
+- Added `src/chunking/phase4_chunk.py` to generate `chunks.jsonl` from Phase 3 output.
+- Default chunk size is 2 pages with 1-page overlap; dialogue pages force single-page chunks.
+- Supports `--overwrite`, `--append` (SQLite-backed dedupe), and `--replace-file-ids`.
+
 ### 3.4 Resume behavior
 
 phase3_extract_text.py must:
 - Support --resume
 - Track processed file_ids in a SQLite DB (similar to earlier phases).
 - Be restart-safe.
-
----
-
-## Completed
 
 ### 3.3 Sharded + compressed outputs
 
@@ -43,34 +49,6 @@ Notes:
 
 Notes:
 - OCR confidence is assumed to be in [0,1]; values above 1 are clamped to 1.0 before averaging.
-
-## Phase 4 — Chunking for Analysis
-
-Create:
-
-src/chunking/phase4_chunk.py
-
-Given the unified text output, produce chunks.jsonl with:
-
-{
-  "chunk_id": str,
-  "file_id": str,
-  "page_start": int,
-  "page_end": int,
-  "text": str,
-  "signals": {
-    "likely_dialogue": bool,
-    "has_dates": bool,
-    "has_names": bool,
-    "low_quality": bool
-  }
-}
-
-Chunking rules (initial version):
-- Default chunk = 2 pages at a time with 1-page overlap.
-- If a page contains dialogue markers (e.g., "Name:", "—", quotes), create smaller chunks.
-
----
 
 ## Phase 5 — LLM Extraction (MVP)
 
