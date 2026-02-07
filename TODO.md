@@ -27,6 +27,25 @@ Work through items **in order** unless explicitly told otherwise.
 - Supports `--signals` (defaults to `llama3.1:8b`) and `--narrative` (defaults to `qwen2.5:32b`),
   with `--model` as an override.
 
+## Phase 6 — Minimal Storage Layer
+
+- Added shared SQLite storage module: `src/loaders/store.py`.
+- Canonical schema is now centralized for:
+  - `entities`, `events`, `conversations`, `mentions`, `meta`
+- Loader behavior is deterministic and fail-soft:
+  - input envelope + item validation
+  - normalized `page_range` -> `page_start/page_end`
+  - idempotent reruns via unique keys + `INSERT OR IGNORE`
+  - normalized quote whitespace for stronger dedupe
+  - consistent summary counters across loaders
+- CLI integration completed:
+  - `fileparse load all` added
+  - `fileparse run --steps ...` load stage uses shared loader path
+- Coverage added:
+  - `tests/test_phase6_loaders.py`
+  - `tests/test_cli_load_help.py`
+- README updated with Phase 6 usage and troubleshooting.
+
 ### 3.4 Resume behavior
 
 phase3_extract_text.py must:
@@ -59,63 +78,6 @@ Notes:
 
 Notes:
 - OCR confidence is assumed to be in [0,1]; values above 1 are clamped to 1.0 before averaging.
-
-## Phase 6 — Minimal Storage Layer
-
-Goal: harden the existing SQLite MVP loaders into a deterministic, testable Phase 6 baseline.
-
-### 6.1 Schema contract + migration safety
-- [ ] Define canonical SQLite schema in one shared module (single source of truth):
-  - tables: `entities`, `events`, `conversations`, `mentions`
-  - required columns, types, and minimal constraints (`NOT NULL` where safe)
-  - indexes for common lookups (`file_id`, `chunk_id`, `entity`, `date`)
-- [ ] Add `meta` table with `schema_version` and loader run timestamps.
-- [ ] Make `--overwrite` deterministic across all loaders (same drop/create order).
-
-### 6.2 Idempotent + deterministic loading behavior
-- [ ] Add stable natural keys and UPSERT rules to prevent duplicate inserts on reruns.
-- [ ] Normalize `page_range` mapping (`page_start`, `page_end`) consistently across loaders.
-- [ ] Track parse/load stats uniformly:
-  - rows attempted
-  - rows inserted
-  - rows skipped
-  - JSON decode errors
-  - invalid item-shape errors
-- [ ] Fail-soft contract: continue past bad lines; summarize failures at end.
-
-### 6.3 Input validation + redaction-safe observability
-- [ ] Validate expected record envelope (`file_id`, `chunk_id`, `items`) before item ingest.
-- [ ] Validate per-item required fields by table (`entity`, `event`, `speaker` as applicable).
-- [ ] Ensure loader logs never print full raw input lines; only counters and short redacted samples.
-
-### 6.4 CLI integration and run-pipeline behavior
-- [ ] Add explicit `fileparse load all` command to run entities/events/conversations loaders in order.
-- [ ] Wire `fileparse run --steps ...` load stage to shared loader utilities.
-- [ ] Document loader defaults (`--db`, `--overwrite`, expected JSONL paths) in CLI help.
-
-### 6.5 Tests (required for Phase 6 exit)
-- [ ] Add loader unit tests for:
-  - schema creation
-  - JSONL line parsing + error handling
-  - `page_range` mapping
-  - idempotent rerun behavior
-- [ ] Add one integration test that loads all three JSONLs into one SQLite DB and verifies:
-  - row counts
-  - index presence
-  - mention linkage integrity
-
-### 6.6 Documentation + handoff
-- [ ] Update README with Phase 6 usage:
-  - single loaders (`fileparse load entities|events|conversations`)
-  - combined load (`fileparse load all`)
-  - inspect DB examples (`sqlite3 output/store.sqlite ...`)
-- [ ] Add a short troubleshooting section for malformed JSONL and duplicate runs.
-
-### Phase 6 Definition of Done
-- [ ] Re-running loaders on the same inputs does not create duplicate rows.
-- [ ] All three loader outputs can be ingested into one SQLite file with consistent schema.
-- [ ] `pytest` includes Phase 6 tests and they pass locally.
-- [ ] `fileparse run --steps extract-text,chunk,llm,load` completes without manual DB fixes.
 
 ---
 
