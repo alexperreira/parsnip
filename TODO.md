@@ -19,6 +19,12 @@ Work through items **in order** unless explicitly told otherwise.
 - Deprecated `--output` is supported as an alias for `--output-dir`.
 - Make targets for Phase 3 and cleanup are available.
 
+### 3.4 Resume behavior
+
+- `--resume` is supported in `phase3_extract_text.py`.
+- Processed `file_id` values are tracked in SQLite (`output/text/resume.db`).
+- Resume mode is restart-safe and validated by `tests/test_phase3_resume.py`.
+
 ## Phase 4 — Chunking for Analysis
 
 - Added `src/chunking/phase4_chunk.py` to generate `chunks.jsonl` from Phase 3 output.
@@ -69,13 +75,6 @@ Work through items **in order** unless explicitly told otherwise.
 - Added coverage:
   - `tests/test_phase7_validate.py`
   - `tests/test_cli_validate_help.py`
-
-### 3.4 Resume behavior
-
-phase3_extract_text.py must:
-- Support --resume
-- Track processed file_ids in a SQLite DB (similar to earlier phases).
-- Be restart-safe.
 
 ### Phase 3.1 — Create module
 - Added `src/text_extraction/phase3_extract_text.py` with PDF text extraction for `text` classifications.
