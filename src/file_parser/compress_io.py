@@ -53,7 +53,7 @@ def open_text_writer(path, zstd_level=None):
         ensure_zstandard_available()
         kwargs = {"encoding": "utf-8"}
         if zstd_level is not None:
-            kwargs["level"] = int(zstd_level)
+            kwargs["cctx"] = _zstandard.ZstdCompressor(level=int(zstd_level))
         return _zstandard.open(path, "wt", **kwargs)
     if path.suffix == ".gz":
         return gzip.open(path, "wt", encoding="utf-8")
