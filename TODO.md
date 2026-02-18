@@ -11,6 +11,14 @@ Work through items **in order** unless explicitly told otherwise.
 
 ## Completed
 
+### 3.3 Sharded + compressed outputs
+
+- Sharded output uses gzip-compressed JSONL files (`docs_0001.jsonl.gz`, etc.).
+- Shard size is configurable via `--shard-size` (default 5000).
+- `output/text/manifest.json` stores an object with `shard_size` and `shards`.
+- Deprecated `--output` is supported as an alias for `--output-dir`.
+- Make targets for Phase 3 and cleanup are available.
+
 ## Phase 4 — Chunking for Analysis
 
 - Added `src/chunking/phase4_chunk.py` to generate `chunks.jsonl` from Phase 3 output.
@@ -69,15 +77,6 @@ phase3_extract_text.py must:
 - Track processed file_ids in a SQLite DB (similar to earlier phases).
 - Be restart-safe.
 
-### 3.3 Sharded + compressed outputs
-
-Notes:
-- Sharded output uses gzip-compressed JSONL files (`docs_0001.jsonl.gz`, etc.).
-- Shard size is configurable via `--shard-size` (default 5000).
-- `output/text/manifest.json` now stores an object with `shard_size` and `shards`.
-- Deprecated `--output` is supported as an alias for `--output-dir`.
-- Added Make targets for phases and cleanup; documented in README.
-
 ### Phase 3.1 — Create module
 - Added `src/text_extraction/phase3_extract_text.py` with PDF text extraction for `text` classifications.
 - Uses Phase 2 OCR outputs for `scanned|mixed|unknown`.
@@ -85,8 +84,7 @@ Notes:
 - Labels pages with `review_required` + `review_reason` if OCR `text_path` is missing/unreadable.
 
 Notes:
-- Current Phase 3 output is a single JSONL file (no sharding yet).
-- No resume support yet.
+- Original Phase 3.1 output shape has been superseded by Phase 3.3 sharded output.
 
 ### Phase 3.2 — Define canonical document schema
 - Added `review_required` + `review_reason` to PDF-text pages so all page records match the canonical schema.

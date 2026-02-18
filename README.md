@@ -165,6 +165,31 @@ Write per-page text files instead of inline text:
 PYTHONPATH=src python -m file_parser.phase2_ocr --input /path/to/input --phase1 output/phase1.jsonl --output output/phase2_ocr.jsonl --text-dir output/ocr_text
 ```
 
+## Phase 3: Unified text extraction
+
+Phase 3 extracts normalized text records and writes gzip-compressed JSONL shards.
+
+```bash
+PYTHONPATH=src python -m text_extraction.phase3_extract_text \
+  --input /path/to/input \
+  --phase1 output/phase1.jsonl \
+  --phase2 output/phase2_ocr.jsonl \
+  --output-dir output/text
+```
+
+Key options:
+
+- `--shard-size N` controls documents per shard (default: `5000`)
+- `--resume` continues from existing shard output
+- `--output` is supported as a deprecated alias for `--output-dir`
+
+Output layout:
+
+- shard files: `output/text/docs_0001.jsonl.gz`, `docs_0002.jsonl.gz`, ...
+- manifest: `output/text/manifest.json` with:
+  - `shard_size`
+  - `shards` entries (`shard`, `start_index`, `end_index`, `doc_count`)
+
 ## Dependencies
 
 - Phase 0: Python standard library only
