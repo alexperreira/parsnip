@@ -2,8 +2,10 @@ import gzip
 import json
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
+from file_parser import compress_io
 from text_extraction.phase3_extract_text import build_phase3
 
 
@@ -22,6 +24,92 @@ class Phase3ResumeTest(unittest.TestCase):
             "source_type": "fs",
             "virtual_path": virtual_path,
         }
+
+    @unittest.skipUnless(compress_io._zstandard is not None, "zstandard dependency is required")
+    def test_default_compression_writes_zst(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            input_root = root / "input"
+            input_root.mkdir(parents=True, exist_ok=True)
+            phase1_path = root / "phase1.jsonl"
+            output_dir = root / "output" / "text"
+
+            records = [self._phase1_record("file_a", "a.pdf")]
+            self._write_phase1(phase1_path, records)
+
+            summary = build_phase3(
+                input_root,
+                phase1_path,
+                output_dir,
+                phase2_path=None,
+                shard_size=10,
+                resume=False,
+            )
+            self.assertEqual(summary["written"], 1)
+
+            manifest_payload = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
+            shard_names = [entry["shard"] for entry in manifest_payload["shards"]]
+            self.assertIn("docs_0001.jsonl.zst", shard_names)
+            self.assertTrue((output_dir / "docs_0001.jsonl.zst").exists())
+
+    def test_zstd_fails_when_dependency_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            input_root = root / "input"
+            input_root.mkdir(parents=True, exist_ok=True)
+            phase1_path = root / "phase1.jsonl"
+            output_dir = root / "output" / "text"
+
+            records = [self._phase1_record("file_a", "a.pdf")]
+            self._write_phase1(phase1_path, records)
+
+            with mock.patch.object(compress_io, "_zstandard", None):
+                with self.assertRaises(SystemExit) as ctx:
+                    build_phase3(
+                        input_root,
+                        phase1_path,
+                        output_dir,
+                        phase2_path=None,
+                        shard_size=10,
+                        resume=False,
+                        compression="zstd",
+                    )
+            self.assertIn("zstandard is required", str(ctx.exception))
+
+    def test_resume_fails_on_compression_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            input_root = root / "input"
+            input_root.mkdir(parents=True, exist_ok=True)
+            phase1_path = root / "phase1.jsonl"
+            output_dir = root / "output" / "text"
+
+            self._write_phase1(phase1_path, [self._phase1_record("file_a", "a.pdf")])
+            build_phase3(
+                input_root,
+                phase1_path,
+                output_dir,
+                phase2_path=None,
+                shard_size=10,
+                resume=False,
+                compression="gzip",
+            )
+
+            self._write_phase1(
+                phase1_path,
+                [self._phase1_record("file_a", "a.pdf"), self._phase1_record("file_b", "b.pdf")],
+            )
+            with self.assertRaises(SystemExit) as ctx:
+                build_phase3(
+                    input_root,
+                    phase1_path,
+                    output_dir,
+                    phase2_path=None,
+                    shard_size=10,
+                    resume=True,
+                    compression="none",
+                )
+            self.assertIn("Compression mismatch with existing shards", str(ctx.exception))
 
     def test_resume_handles_extra_shard_and_new_records(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -44,6 +132,7 @@ class Phase3ResumeTest(unittest.TestCase):
                 phase2_path=None,
                 shard_size=10,
                 resume=False,
+                compression="gzip",
             )
             self.assertEqual(summary["written"], 2)
 
@@ -74,6 +163,7 @@ class Phase3ResumeTest(unittest.TestCase):
                 phase2_path=None,
                 shard_size=10,
                 resume=True,
+                compression="gzip",
             )
             self.assertEqual(summary["written"], 1)
             self.assertEqual(summary["skipped"], 3)
@@ -105,6 +195,7 @@ class Phase3ResumeTest(unittest.TestCase):
                 phase2_path=None,
                 shard_size=10,
                 resume=False,
+                compression="gzip",
             )
             self.assertEqual(summary["written"], 1)
 
@@ -125,6 +216,7 @@ class Phase3ResumeTest(unittest.TestCase):
                     phase2_path=None,
                     shard_size=10,
                     resume=True,
+                    compression="gzip",
                 )
             self.assertIn("Failed to read shard", str(ctx.exception))
 
@@ -146,6 +238,7 @@ class Phase3ResumeTest(unittest.TestCase):
                 phase2_path=None,
                 shard_size=10,
                 resume=False,
+                compression="gzip",
             )
             self.assertEqual(summary["written"], 1)
 
@@ -162,6 +255,7 @@ class Phase3ResumeTest(unittest.TestCase):
                     phase2_path=None,
                     shard_size=10,
                     resume=True,
+                    compression="gzip",
                 )
             self.assertIn("Shard size mismatch", str(ctx.exception))
 
@@ -216,6 +310,7 @@ class Phase3ResumeTest(unittest.TestCase):
                     phase2_path=None,
                     shard_size=10,
                     resume=True,
+                    compression="gzip",
                 )
             self.assertIn("Shard size mismatch", str(ctx.exception))
 

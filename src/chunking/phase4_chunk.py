@@ -1,9 +1,10 @@
 import argparse
-import gzip
 import json
 import re
 import sqlite3
 from pathlib import Path
+
+from file_parser.compress_io import open_text_reader
 DEFAULT_CHUNK_SIZE = 2
 DEFAULT_OVERLAP = 1
 DIALOGUE_RE = re.compile(
@@ -19,9 +20,7 @@ DATE_RE = re.compile(
 NAME_RE = re.compile(r"\b[A-Z][a-z]+\s+[A-Z][a-z]+\b")
 
 def _open_jsonl(path: Path):
-    return gzip.open(path, "rt", encoding="utf-8") if path.suffix == ".gz" else path.open(
-        "r", encoding="utf-8"
-    )
+    return open_text_reader(path)
 
 def _iter_jsonl(path: Path):
     with _open_jsonl(path) as handle:
@@ -48,9 +47,17 @@ def _iter_records(input_path: Path):
             shard_names = [entry.get("shard") for entry in manifest.get("shards") or []]
             shard_paths = [input_path / name for name in shard_names if name]
         else:
-            shard_paths = sorted(input_path.glob("docs_*.jsonl.gz"))
+            shard_paths = []
+            for pattern in ("docs_*.jsonl.zst", "docs_*.jsonl.gz", "docs_*.jsonl"):
+                matches = sorted(input_path.glob(pattern))
+                if matches:
+                    shard_paths = matches
+                    break
         if not shard_paths:
-            raise SystemExit("No shard files found in input directory.")
+            raise SystemExit(
+                "No shard files found in input directory "
+                "(supported: docs_*.jsonl.zst, docs_*.jsonl.gz, docs_*.jsonl)."
+            )
         for shard_path in shard_paths:
             if not shard_path.exists():
                 raise SystemExit(f"Shard missing: {shard_path.name}")

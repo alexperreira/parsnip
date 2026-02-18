@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from file_parser import compress_io
 from file_parser.phase7_validate import build_phase7
 
 
@@ -18,6 +19,14 @@ class Phase7ValidateTest(unittest.TestCase):
 
     def _write_jsonl_gz(self, path, records):
         with gzip.open(path, "wt", encoding="utf-8") as handle:
+            for record in records:
+                if isinstance(record, str):
+                    handle.write(record + "\n")
+                else:
+                    handle.write(json.dumps(record, ensure_ascii=True) + "\n")
+
+    def _write_jsonl_zst(self, path, records):
+        with compress_io.open_text_writer(path) as handle:
             for record in records:
                 if isinstance(record, str):
                     handle.write(record + "\n")
@@ -154,6 +163,34 @@ class Phase7ValidateTest(unittest.TestCase):
             self.assertEqual(len(summary["warnings"]), 2)
             self.assertIn("entities_record_count_mismatch", summary["warnings"][0])
             self.assertIn("events_record_count_mismatch", summary["warnings"][1])
+
+    @unittest.skipUnless(compress_io._zstandard is not None, "zstandard dependency is required")
+    def test_build_phase7_reads_zst_shards(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            chunks_path = root / "chunks.jsonl"
+            entities_path = root / "entities.jsonl"
+            events_path = root / "events.jsonl"
+            phase3_dir = root / "text"
+            phase3_dir.mkdir(parents=True, exist_ok=True)
+
+            self._write_jsonl(chunks_path, [{"chunk_id": "a:0-0", "file_id": "a"}])
+            self._write_jsonl(entities_path, [{"chunk_id": "a:0-0", "items": []}])
+            self._write_jsonl(events_path, [{"chunk_id": "a:0-0", "items": []}])
+            self._write_jsonl_zst(
+                phase3_dir / "docs_0001.jsonl.zst",
+                [{"file_id": "a", "pages": [{"page_index": 0, "text": "x"}]}],
+            )
+
+            summary = build_phase7(
+                chunks_path=chunks_path,
+                entities_path=entities_path,
+                events_path=events_path,
+                phase3_path=phase3_dir,
+            )
+            self.assertEqual(summary["phase3_docs"], 1)
+            self.assertEqual(summary["phase3_total_pages"], 1)
+            self.assertEqual(summary["phase3_empty_text_pages"], 0)
 
     def test_build_phase7_missing_required_input(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -167,7 +167,7 @@ PYTHONPATH=src python -m file_parser.phase2_ocr --input /path/to/input --phase1 
 
 ## Phase 3: Unified text extraction
 
-Phase 3 extracts normalized text records and writes gzip-compressed JSONL shards.
+Phase 3 extracts normalized text records and writes Zstandard-compressed JSONL shards by default.
 
 ```bash
 PYTHONPATH=src python -m text_extraction.phase3_extract_text \
@@ -180,12 +180,15 @@ PYTHONPATH=src python -m text_extraction.phase3_extract_text \
 Key options:
 
 - `--shard-size N` controls documents per shard (default: `5000`)
+- `--compression {zstd,gzip,none}` controls shard compression (default: `zstd`)
+- `--zstd-level N` sets Zstandard compression level (default: `3`)
 - `--resume` continues from existing shard output
 - `--output` is supported as a deprecated alias for `--output-dir`
+- `--resume` enforces a single shard compression mode per output directory
 
 Output layout:
 
-- shard files: `output/text/docs_0001.jsonl.gz`, `docs_0002.jsonl.gz`, ...
+- shard files: `output/text/docs_0001.jsonl.zst`, `docs_0002.jsonl.zst`, ...
 - manifest: `output/text/manifest.json` with:
   - `shard_size`
   - `shards` entries (`shard`, `start_index`, `end_index`, `doc_count`)
@@ -194,6 +197,7 @@ Output layout:
 
 - Phase 0: Python standard library only
 - Phase 1: `pypdf` (see `requirements.txt`)
+- Phase 3 default compression: `zstandard`
 
 ## Phase 6: SQLite loaders
 

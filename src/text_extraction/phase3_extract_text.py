@@ -1,11 +1,17 @@
 import argparse
-import gzip
 import json
 import sqlite3
 import tempfile
 import zipfile
 from pathlib import Path
 
+from file_parser.compress_io import (
+    ensure_zstandard_available,
+    open_text_reader,
+    open_text_writer,
+    shard_compression_from_name,
+    shard_suffix_for_compression,
+)
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
@@ -13,6 +19,8 @@ from pypdf.errors import PdfReadError
 TEXT_CLASSIFICATIONS = {"text"}
 OCR_CLASSIFICATIONS = {"scanned", "mixed", "unknown"}
 DEFAULT_SHARD_SIZE = 5000
+DEFAULT_COMPRESSION = "zstd"
+DEFAULT_ZSTD_LEVEL = 3
 
 
 class _ResumeIndex:
@@ -41,9 +49,12 @@ class _ResumeIndex:
 
 def _parse_shard_index(shard_name):
     prefix = "docs_"
-    suffix = ".jsonl.gz"
-    if not shard_name.startswith(prefix) or not shard_name.endswith(suffix):
+    if not shard_name.startswith(prefix):
         return None
+    compression = shard_compression_from_name(shard_name)
+    if compression is None:
+        return None
+    suffix = shard_suffix_for_compression(compression)
     index_text = shard_name[len(prefix) : -len(suffix)]
     if not index_text.isdigit():
         return None
@@ -77,7 +88,7 @@ def _resume_index_count(resume_index):
 
 def _read_shard_file(shard_path, resume_index):
     doc_count = 0
-    with gzip.open(shard_path, "rt", encoding="utf-8") as handle:
+    with open_text_reader(shard_path) as handle:
         for line in handle:
             line = line.strip()
             if not line:
@@ -91,6 +102,38 @@ def _read_shard_file(shard_path, resume_index):
                 resume_index.add(file_id)
             doc_count += 1
     return doc_count
+
+
+def _discover_shard_files(output_dir):
+    names = set()
+    for pattern in ("docs_*.jsonl.zst", "docs_*.jsonl.gz", "docs_*.jsonl"):
+        for path in output_dir.glob(pattern):
+            names.add(path.name)
+    return sorted(names, key=lambda name: (_parse_shard_index(name) or 0, name))
+
+
+def _validate_resume_compression(compression, manifest_entries, shard_files):
+    shard_names = [entry.get("shard") for entry in manifest_entries if entry.get("shard")]
+    shard_names.extend(shard_files)
+
+    modes = set()
+    for shard_name in shard_names:
+        mode = shard_compression_from_name(shard_name)
+        if mode:
+            modes.add(mode)
+
+    if len(modes) > 1:
+        modes_text = ", ".join(sorted(modes))
+        raise SystemExit(
+            "Mixed shard compression detected in output directory "
+            f"({modes_text}); use a fresh output directory."
+        )
+    if modes and compression not in modes:
+        existing = sorted(modes)[0]
+        raise SystemExit(
+            "Compression mismatch with existing shards "
+            f"({existing}); use --compression {existing} or a new output directory."
+        )
 
 
 def _parse_zip_virtual_path(virtual_path):
@@ -259,10 +302,11 @@ def _estimate_quality(pages):
     return round((text_ratio + avg_conf) / 2, 6)
 
 
-def _open_shard(output_dir, shard_index):
-    shard_name = f"docs_{shard_index:04d}.jsonl.gz"
+def _open_shard(output_dir, shard_index, compression, zstd_level):
+    suffix = shard_suffix_for_compression(compression)
+    shard_name = f"docs_{shard_index:04d}{suffix}"
     shard_path = output_dir / shard_name
-    handle = gzip.open(shard_path, "wt", encoding="utf-8")
+    handle = open_text_writer(shard_path, zstd_level=zstd_level)
     return shard_name, shard_path, handle
 
 
@@ -273,6 +317,8 @@ def build_phase3(
     phase2_path=None,
     shard_size=DEFAULT_SHARD_SIZE,
     resume=False,
+    compression=DEFAULT_COMPRESSION,
+    zstd_level=None,
 ):
     root_path = Path(input_path).resolve()
     if not root_path.exists() or not root_path.is_dir():
@@ -293,6 +339,22 @@ def build_phase3(
         raise SystemExit("Shard size must be an integer.")
     if shard_size <= 0:
         raise SystemExit("Shard size must be a positive integer.")
+
+    compression = str(compression or "").strip().lower()
+    if compression not in {"zstd", "gzip", "none"}:
+        raise SystemExit("Compression must be one of: zstd, gzip, none.")
+
+    if compression == "zstd":
+        if zstd_level is None:
+            zstd_level = DEFAULT_ZSTD_LEVEL
+        try:
+            zstd_level = int(zstd_level)
+        except (TypeError, ValueError):
+            raise SystemExit("Zstd level must be an integer.")
+        if zstd_level <= 0:
+            raise SystemExit("Zstd level must be a positive integer.")
+    elif zstd_level is not None:
+        raise SystemExit("--zstd-level can only be used with --compression zstd.")
 
     phase2_index = _index_phase2(phase2_path)
 
@@ -346,7 +408,8 @@ def build_phase3(
                     raise SystemExit(f"Manifest shard missing: {shard_name}")
 
         resume_count = _resume_index_count(resume_index)
-        shard_files = sorted(path.name for path in output_dir.glob("docs_*.jsonl.gz"))
+        shard_files = _discover_shard_files(output_dir)
+        _validate_resume_compression(compression, manifest_entries, shard_files)
         if not manifest_entries and not shard_files and resume_count > 0:
             raise SystemExit(
                 "resume.db exists without shards or manifest; "
@@ -424,6 +487,9 @@ def build_phase3(
                     "move resume.db aside or use a new output directory."
                 )
 
+    if compression == "zstd":
+        ensure_zstandard_available()
+
     try:
         try:
             for record in _iter_phase1_records(phase1_path):
@@ -461,7 +527,12 @@ def build_phase3(
                 if shard_handle is None:
                     shard_index += 1
                     shard_start = total_written
-                    shard_name, _, shard_handle = _open_shard(output_dir, shard_index)
+                    shard_name, _, shard_handle = _open_shard(
+                        output_dir,
+                        shard_index,
+                        compression=compression,
+                        zstd_level=zstd_level,
+                    )
 
                 output_record = {
                     "file_id": file_id,
@@ -524,7 +595,7 @@ def _parse_args():
     parser.add_argument(
         "--output-dir",
         default="output/text",
-        help="Output directory for sharded JSONL.GZ files.",
+        help="Output directory for sharded JSONL files.",
     )
     parser.add_argument(
         "--output",
@@ -535,6 +606,17 @@ def _parse_args():
         "--shard-size",
         default=DEFAULT_SHARD_SIZE,
         help="Documents per shard (default: 5000).",
+    )
+    parser.add_argument(
+        "--compression",
+        choices=["zstd", "gzip", "none"],
+        default=DEFAULT_COMPRESSION,
+        help="Shard compression format (default: zstd).",
+    )
+    parser.add_argument(
+        "--zstd-level",
+        default=None,
+        help=f"Zstandard compression level (default: {DEFAULT_ZSTD_LEVEL}).",
     )
     parser.add_argument(
         "--resume",
@@ -556,6 +638,8 @@ def main():
         phase2_path=args.phase2,
         shard_size=args.shard_size,
         resume=args.resume,
+        compression=args.compression,
+        zstd_level=args.zstd_level,
     )
     print("Phase 3 summary")
     print(f"  written: {summary['written']}")

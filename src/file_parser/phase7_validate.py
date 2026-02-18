@@ -1,7 +1,8 @@
 import argparse
-import gzip
 import json
 from pathlib import Path
+
+from file_parser.compress_io import open_text_reader
 
 
 def _safe_pct(numerator, denominator):
@@ -11,8 +12,7 @@ def _safe_pct(numerator, denominator):
 
 
 def _iter_jsonl(path):
-    opener = gzip.open if path.suffix == ".gz" else Path.open
-    with opener(path, "rt", encoding="utf-8") as handle:
+    with open_text_reader(path) as handle:
         for line in handle:
             line = line.strip()
             if not line:
@@ -50,13 +50,14 @@ def _phase3_shards(phase3_path):
     manifest_shards = _manifest_shards(phase3_path)
     if manifest_shards is not None:
         return manifest_shards
-    shards = sorted(phase3_path.glob("docs_*.jsonl.gz"))
-    if shards:
-        return shards
-    shards = sorted(phase3_path.glob("docs_*.jsonl"))
-    if shards:
-        return shards
-    raise SystemExit("No Phase 3 shard files found.")
+    for pattern in ("docs_*.jsonl.zst", "docs_*.jsonl.gz", "docs_*.jsonl"):
+        shards = sorted(phase3_path.glob(pattern))
+        if shards:
+            return shards
+    raise SystemExit(
+        "No Phase 3 shard files found "
+        "(supported: docs_*.jsonl.zst, docs_*.jsonl.gz, docs_*.jsonl)."
+    )
 
 
 def _count_chunks(chunks_path):
