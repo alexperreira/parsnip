@@ -64,7 +64,7 @@ readers, clear docs, and tests to prevent regressions.
 Create a small helper to centralize all compression logic. Suggested API:
 
 - `open_text_reader(path: Path) -> TextIO`
-- `open_text_writer(path: Path) -> TextIO`
+- `open_text_writer(path: Path, zstd_level: int | None = None) -> TextIO`
 
 Routing rules:
 
@@ -100,6 +100,11 @@ Resume considerations:
 
 - Ensure `--resume` continues to work regardless of shard suffix.
 - The resume DB should track logical work (e.g. `file_id`) rather than shard filenames.
+- Add an explicit compression compatibility check for resume:
+  - if existing shards/manifest are `gzip` or `none`, and user requests `zstd`, fail fast
+  - do not silently mix shard formats in one output directory
+- Update all Phase 3 shard indexing/discovery paths to support `.jsonl.zst`, `.jsonl.gz`,
+  and `.jsonl` (manifest parsing, fallback shard globbing, shard index parsing).
 
 ### C) Phase 4 reader: accept `.zst` shards
 
@@ -159,6 +164,12 @@ Add/extend tests to cover:
 - Keep at least one test that reads `.jsonl.gz` shards (or writes them) to ensure
   gzip support does not regress.
 
+### 3) Phase 3 behavior
+
+- Verify Phase 3 default output shard names are `.jsonl.zst`.
+- Verify `--resume` fails fast on compression mismatch (prevents mixed-format outputs).
+- Verify clear failure when `.zst` is requested and `zstandard` dependency is unavailable.
+
 Testing approach recommendation:
 
 - Prefer using the shared helper to write small test shards deterministically rather
@@ -170,6 +181,8 @@ Testing approach recommendation:
 - Phase 4 chunking works when `--input` points at a directory with `.zst` shards.
 - Phase 7 validation works when `--phase3` points at a directory with `.zst` shards.
 - `.jsonl.gz` and plain `.jsonl` shard directories remain readable by Phase 4 and Phase 7.
+- Resume mode enforces single compression mode per output directory (no mixed shard suffixes).
+- Requesting `.zst` without `zstandard` installed fails with a clear, actionable error.
 - `make test` passes in a clean environment with declared Python deps installed.
 
 ## Rollout / Migration Notes
@@ -178,6 +191,26 @@ Testing approach recommendation:
   they remain readable.
 - Consider documenting a simple one-off migration command (optional) if disk pressure is
   a concern, but keep it out of the core pipeline.
+
+## Operational Notes (Day-to-Day Use)
+
+- Quick inspection of shard contents will change from `zcat` to `zstdcat` (or `unzstd -c`).
+- Any ad-hoc scripts that glob for `docs_*.jsonl.gz` must be updated to prefer:
+  - `docs_*.jsonl.zst` first, then `.gz`, then `.jsonl`
+- For a one-time ingest, the primary benefit is disk and transfer size reduction; the
+  largest wall-time wins will still typically come from OCR and LLM stages.
+
+## Follow-On Work (Explicitly Out of Scope Here)
+
+This plan only changes the shard compression format. It does not address mixed-PDF
+quality/cost issues.
+
+- `L2 — Smarter Mixed-PDF Handling` (recommended next if you expect many `mixed` PDFs):
+  - Add deterministic per-page decisions for `mixed` PDFs: use embedded text where present,
+    OCR only image-heavy / low-text pages.
+  - Add per-page quality scoring fields in Phase 3 page records.
+  - Phase 2 and Phase 3 will need schema-aware changes, but these should remain orthogonal
+    to shard compression (the `.zst` helper should be reusable as-is).
 
 ## Commands To Run During Implementation (When Approved)
 
@@ -195,4 +228,3 @@ Optional smoke run (requires a small input directory with PDFs):
 - `PYTHONPATH=src python -m text_extraction.phase3_extract_text --input /path/to/input --phase1 output/phase1.jsonl --phase2 output/phase2_ocr.jsonl --output-dir output/text`
 - `PYTHONPATH=src python -m chunking.phase4_chunk --input output/text --output output/text/chunks.jsonl`
 - `PYTHONPATH=src python -m file_parser.phase7_validate --chunks output/text/chunks.jsonl --entities output/entities.jsonl --events output/events.jsonl --conversations output/conversations.jsonl --phase3 output/text`
-
