@@ -95,14 +95,14 @@ Target file:
 - `src/text_extraction/phase3_extract_text.py`
 
 Tasks:
-- [ ] For `mixed` docs, merge per-page sources using deterministic precedence:
+- [x] For `mixed` docs, merge per-page sources using deterministic precedence:
   - 1) embedded PDF text when `text_char_count >= text_page_min_chars`
   - 2) OCR text when available
   - 3) empty text with `review_required=true` + reason
-- [ ] Add per-page quality scoring helper.
-- [ ] Add `quality_score_page`, `quality_flags`, `text_char_count` fields.
-- [ ] Recompute document-level `quality_score` as mean of page-level scores.
-- [ ] Ensure behavior stays deterministic and suffix/compression logic remains untouched.
+- [x] Add per-page quality scoring helper.
+- [x] Add `quality_score_page`, `quality_flags`, `text_char_count` fields.
+- [x] Recompute document-level `quality_score` as mean of page-level scores.
+- [x] Ensure behavior stays deterministic and suffix/compression logic remains untouched.
 
 ## 4) Phase 7: Validation Metrics for Mixed Routing
 Target file:
