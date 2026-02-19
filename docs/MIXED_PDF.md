@@ -137,9 +137,9 @@ Target files:
 - `docs/TODO_LONG_TERM.md` (optional status note)
 
 Tasks:
-- [ ] Document new Phase 2 flags and mixed routing behavior.
-- [ ] Document new Phase 3 per-page quality fields.
-- [ ] Add a short operator note on expected speed/cost effect for mixed PDFs.
+- [x] Document new Phase 2 flags and mixed routing behavior.
+- [x] Document new Phase 3 per-page quality fields.
+- [x] Add a short operator note on expected speed/cost effect for mixed PDFs.
 
 ## Acceptance Criteria
 

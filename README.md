@@ -18,6 +18,9 @@ Common flags:
 - `--max-pages N` to cap OCR pages per PDF
 - `--text-dir output/ocr_text` to write per-page text files
 - `--progress-interval N` to print Phase 2 progress
+- `--mixed-ocr-mode {all,image-heavy}` to control mixed-PDF OCR routing
+- `--text-page-min-chars N` mixed-page threshold for embedded text pages
+- `--low-text-max-chars N` mixed-page threshold for low-text OCR routing
 
 ## Make targets (shortcuts)
 
@@ -165,6 +168,36 @@ Write per-page text files instead of inline text:
 PYTHONPATH=src python -m file_parser.phase2_ocr --input /path/to/input --phase1 output/phase1.jsonl --output output/phase2_ocr.jsonl --text-dir output/ocr_text
 ```
 
+### Mixed PDF routing (deterministic)
+
+By default, Phase 2 uses `--mixed-ocr-mode image-heavy` and routes each `mixed` PDF page deterministically:
+
+- `text_char_count >= text_page_min_chars` -> `ocr_decision=skip_pdf_text`
+- `text_char_count <= low_text_max_chars` and `has_image=true` -> `ocr_decision=ocr`
+- `low_text_max_chars < text_char_count < text_page_min_chars` and `has_image=true` -> `ocr_decision=skip_pdf_text`
+- `has_image=false` -> `ocr_decision=skip_no_image`
+
+Routing flags:
+
+- `--mixed-ocr-mode {all,image-heavy}` (default: `image-heavy`)
+- `--text-page-min-chars` (default: `50`)
+- `--low-text-max-chars` (default: `10`)
+
+Force OCR on all mixed pages:
+
+```bash
+PYTHONPATH=src python -m file_parser.phase2_ocr --input /path/to/input --phase1 output/phase1.jsonl --output output/phase2_ocr.jsonl --mixed-ocr-mode all
+```
+
+Phase 2 page records include additive mixed-routing fields:
+
+- `ocr_decision` (`ocr|skip_pdf_text|skip_no_image|error`)
+- `ocr_reason` (deterministic reason string)
+- `signal_text_chars` (integer)
+- `signal_has_image` (boolean)
+
+Operator note: with `--mixed-ocr-mode image-heavy`, mixed PDFs usually run faster and use less OCR compute than `all`, because text-bearing pages skip OCR.
+
 ## Phase 3: Unified text extraction
 
 Phase 3 extracts normalized text records and writes Zstandard-compressed JSONL shards by default.
@@ -192,6 +225,16 @@ Output layout:
 - manifest: `output/text/manifest.json` with:
   - `shard_size`
   - `shards` entries (`shard`, `start_index`, `end_index`, `doc_count`)
+
+### Per-page quality fields
+
+Phase 3 writes additive per-page quality fields (no field removals/renames):
+
+- `quality_score_page` float in `[0,1]`
+- `quality_flags` list of strings (for example: `empty_text`, `low_text`, `ocr_error`, `missing_source`)
+- `text_char_count` integer
+
+Document-level `quality_score` is the mean of `quality_score_page` across the document pages.
 
 ## Dependencies
 

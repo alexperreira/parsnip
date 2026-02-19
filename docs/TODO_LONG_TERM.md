@@ -20,6 +20,7 @@ DO NOT implement these items until instructed.
   - Extract text where available.
   - OCR only image-heavy pages.
 - Add per-page quality scoring.
+- Status update (2026-02-19): implemented in the active pipeline; see `docs/MIXED_PDF.md` for rollout details.
 
 ---
 
