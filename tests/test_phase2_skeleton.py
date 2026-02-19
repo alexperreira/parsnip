@@ -270,9 +270,9 @@ class Phase2SkeletonTest(unittest.TestCase):
                                 page_workers=1,
                             )
                             self.assertEqual(summary["written"], 1)
-                            self.assertEqual(run_mock.call_count, 2)
+                            self.assertEqual(run_mock.call_count, 1)
 
-            self.assertEqual(render_calls, [(1, 2)])
+            self.assertEqual(render_calls, [(2, 2)])
             output_records = [
                 json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines()
             ]
@@ -280,11 +280,11 @@ class Phase2SkeletonTest(unittest.TestCase):
             self.assertEqual(len(pages), 2)
 
             self.assertEqual(pages[0]["page_index"], 0)
-            self.assertEqual(pages[0]["ocr_decision"], "ocr")
-            self.assertEqual(pages[0]["ocr_reason"], "image_detected_trigger")
+            self.assertEqual(pages[0]["ocr_decision"], "skip_pdf_text")
+            self.assertEqual(pages[0]["ocr_reason"], "text_page_threshold_met")
             self.assertEqual(pages[0]["signal_text_chars"], 80)
             self.assertTrue(pages[0]["signal_has_image"])
-            self.assertEqual(pages[0]["text"], "ocr text")
+            self.assertEqual(pages[0]["text"], "")
 
             self.assertEqual(pages[1]["page_index"], 1)
             self.assertEqual(pages[1]["ocr_decision"], "ocr")

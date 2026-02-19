@@ -243,9 +243,6 @@ def _mixed_image_heavy_page_plan(temp_pdf, total_pages, text_page_min_chars, low
             text_page_min_chars=text_page_min_chars,
             low_text_max_chars=low_text_max_chars,
         )
-        if has_image and decision != "ocr":
-            decision = "ocr"
-            reason = "image_detected_trigger"
         page_plan[page_index] = {
             "ocr_decision": decision,
             "ocr_reason": reason,

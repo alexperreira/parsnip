@@ -122,13 +122,13 @@ Target files:
 - `tests/test_phase7_validate.py`
 
 Tasks:
-- [ ] Phase 2 mixed-page routing test:
+- [x] Phase 2 mixed-page routing test:
   - mixed doc with one text-heavy page and one image-heavy page.
   - assert OCR executes only for image-heavy page.
-- [ ] Phase 3 merge test:
+- [x] Phase 3 merge test:
   - assert mixed doc output uses PDF text on text-heavy page and OCR on image-heavy page.
   - assert per-page quality fields exist and are bounded.
-- [ ] Phase 7 metric test:
+- [x] Phase 7 metric test:
   - assert new source/quality counters and rates are computed.
 
 ## 6) Documentation
