@@ -13,6 +13,7 @@ from chunking.phase4_chunk import main as phase4_main
 from llm.extract_conversations import main as llm_conversations_main
 from llm.extract_entities import main as llm_entities_main
 from llm.extract_events import main as llm_events_main
+from llm.extract_identity_signals import main as llm_identity_signals_main
 from loaders.load_conversations import main as load_conversations_main
 from loaders.load_entities import main as load_entities_main
 from loaders.load_events import main as load_events_main
@@ -115,6 +116,11 @@ def llm_events(ctx: typer.Context):
 @llm_app.command("conversations", help="Extract conversations from chunks.jsonl via LLM.")
 def llm_conversations(ctx: typer.Context):
     _dispatch_to_main("llm conversations", list(ctx.args), llm_conversations_main)
+
+
+@llm_app.command("identity-signals", help="Extract identity signals from chunks.jsonl via LLM.")
+def llm_identity_signals(ctx: typer.Context):
+    _dispatch_to_main("llm identity-signals", list(ctx.args), llm_identity_signals_main)
 
 
 @load_app.command("entities", help="Load entities JSONL into SQLite.")

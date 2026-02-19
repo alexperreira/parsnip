@@ -222,9 +222,9 @@ Error handling:
 [x] Run baseline tests (focused): `pytest -q tests/test_phase6_loaders.py`.
 
 ### 1) Add Identity Signal Extractor (Phase 5-style)
-[ ] Add `src/llm/extract_identity_signals.py` with strict JSON schema.
-[ ] Add CLI wiring under `fileparse llm …` (new subcommand).
-[ ] Keep temperature 0 and fail-soft error recording like other LLM extractors.
+[x] Add `src/llm/extract_identity_signals.py` with strict JSON schema.
+[x] Add CLI wiring under `fileparse llm …` (new subcommand).
+[x] Keep temperature 0 and fail-soft error recording like other LLM extractors.
 
 ### 2) Add Loader + Schema v2
 [ ] Bump `SCHEMA_VERSION` and extend `ensure_schema` to create new tables/indexes.

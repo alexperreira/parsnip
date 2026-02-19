@@ -1,0 +1,203 @@
+import argparse
+import json
+import time
+import urllib.error
+import urllib.request
+
+
+ALLOWED_ATTRIBUTES = {"dob", "address", "case_id"}
+
+
+def _parse_args():
+    parser = argparse.ArgumentParser(
+        description="Extract identity signals (DOB/address/case_id) from chunks.jsonl."
+    )
+    parser.add_argument(
+        "--input",
+        default="chunks.jsonl",
+        help="Input chunks JSONL path (default: chunks.jsonl).",
+    )
+    parser.add_argument(
+        "--output",
+        default="identity_signals.jsonl",
+        help="Output JSONL path (default: identity_signals.jsonl).",
+    )
+    parser.add_argument(
+        "--signals",
+        action="store_true",
+        help="Use fast signals model defaults (llama3.1:8b).",
+    )
+    parser.add_argument(
+        "--narrative",
+        action="store_true",
+        help="Use narrative model defaults (qwen2.5:32b).",
+    )
+    parser.add_argument("--model", default="llama3", help="Ollama model name.")
+    parser.add_argument(
+        "--host",
+        default="http://localhost:11434",
+        help="Ollama host (default: http://localhost:11434).",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=120,
+        help="Request timeout in seconds (default: 120).",
+    )
+    parser.add_argument(
+        "--max-chunks",
+        type=int,
+        default=None,
+        help="Optional limit on chunks processed.",
+    )
+    return parser.parse_args()
+
+
+def _resolve_model(args):
+    if args.signals and args.narrative:
+        raise SystemExit("Choose only one of --signals or --narrative.")
+    if args.model != "llama3":
+        return args.model
+    if args.signals:
+        return "llama3.1:8b"
+    if args.narrative:
+        return "qwen2.5:32b"
+    return args.model
+
+
+def _build_prompt(text):
+    return (
+        "You are an information extraction engine. "
+        "Return ONLY valid JSON with this schema:\n"
+        '{ "items": [ { "person": string, "attribute": string, "value": string, '
+        '"quote": string, "confidence": float } ] }\n'
+        "Use an empty list if no identity signals are found. "
+        "Only emit attribute values from this set: dob, address, case_id. "
+        "If you emit dob, prefer ISO-8601 (YYYY-MM-DD) when possible. "
+        "Quotes must be short, verbatim spans from the input.\n\n"
+        f"INPUT:\n{text}"
+    )
+
+
+def _call_ollama(prompt, model, host, timeout):
+    url = host.rstrip("/") + "/api/generate"
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"temperature": 0},
+    }
+    data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        body = response.read().decode("utf-8")
+    parsed = json.loads(body)
+    return parsed.get("response", "")
+
+
+def _parse_response(text):
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None, "invalid_json"
+    items = payload.get("items")
+    if not isinstance(items, list):
+        return None, "missing_items"
+    return _clean_items(items), None
+
+
+def _clean_items(items):
+    cleaned = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        person = item.get("person")
+        attribute = item.get("attribute")
+        value = item.get("value")
+        quote = item.get("quote")
+        confidence = item.get("confidence")
+        if not isinstance(person, str) or not person.strip():
+            continue
+        if not isinstance(attribute, str) or not attribute.strip():
+            continue
+        attribute = attribute.strip().lower()
+        if attribute not in ALLOWED_ATTRIBUTES:
+            continue
+        if not isinstance(value, str) or not value.strip():
+            continue
+        if not isinstance(quote, str) or not quote.strip():
+            continue
+        if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
+            continue
+        cleaned.append(
+            {
+                "person": person.strip(),
+                "attribute": attribute,
+                "value": value.strip(),
+                "quote": quote.strip(),
+                "confidence": float(confidence),
+            }
+        )
+    return cleaned
+
+
+def main():
+    args = _parse_args()
+    model = _resolve_model(args)
+    processed = 0
+    errors = 0
+    started = time.monotonic()
+
+    with open(args.input, "r", encoding="utf-8") as in_handle, open(
+        args.output, "w", encoding="utf-8"
+    ) as out_handle:
+        for line in in_handle:
+            if args.max_chunks is not None and processed >= args.max_chunks:
+                break
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                errors += 1
+                continue
+
+            chunk_text = record.get("text", "")
+            prompt = _build_prompt(chunk_text)
+            error = None
+            items = []
+            try:
+                response_text = _call_ollama(prompt, model, args.host, args.timeout)
+                items, error = _parse_response(response_text)
+                if error:
+                    errors += 1
+                    items = []
+            except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
+                errors += 1
+                error = "ollama_unavailable"
+            except Exception:
+                errors += 1
+                error = "ollama_error"
+
+            output_record = {
+                "file_id": record.get("file_id"),
+                "chunk_id": record.get("chunk_id"),
+                "page_range": [record.get("page_start"), record.get("page_end")],
+                "items": items,
+                "model": model,
+                "error": error,
+            }
+            out_handle.write(json.dumps(output_record, ensure_ascii=True) + "\n")
+            processed += 1
+
+    elapsed = round(time.monotonic() - started, 3)
+    print("LLM identity signals summary")
+    print(f"  processed: {processed}")
+    print(f"  errors: {errors}")
+    print(f"  elapsed_seconds: {elapsed}")
+
+
+if __name__ == "__main__":
+    main()
+
