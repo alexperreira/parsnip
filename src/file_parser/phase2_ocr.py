@@ -10,6 +10,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from shutil import which
 
+from file_parser.phase1_detect import LOW_TEXT_MAX_CHARS
+from file_parser.phase1_detect import TEXT_PAGE_MIN_CHARS
+from file_parser.pdf_page_signals import inspect_pdf_pages
+from file_parser.pdf_page_signals import mixed_page_ocr_decision
+
 
 class _ResumeIndex:
     def __init__(self, db_path):
@@ -185,6 +190,83 @@ def _maybe_print_progress(processed, total, started, last_print, interval):
     return now
 
 
+def _iter_render_chunks(page_numbers, batch_size):
+    if not page_numbers:
+        return
+    chunk = [page_numbers[0]]
+    for page_number in page_numbers[1:]:
+        is_contiguous = page_number == chunk[-1] + 1
+        if is_contiguous and len(chunk) < batch_size:
+            chunk.append(page_number)
+            continue
+        yield chunk
+        chunk = [page_number]
+    yield chunk
+
+
+def _default_page_plan(classification, total_pages):
+    reason = "mixed_mode_all" if classification == "mixed" else "classification_requires_ocr"
+    return [
+        {
+            "ocr_decision": "ocr",
+            "ocr_reason": reason,
+            "signal_text_chars": 0,
+            "signal_has_image": False,
+        }
+        for _ in range(total_pages)
+    ]
+
+
+def _mixed_image_heavy_page_plan(temp_pdf, total_pages, text_page_min_chars, low_text_max_chars):
+    page_plan = [
+        {
+            "ocr_decision": "ocr",
+            "ocr_reason": "missing_signal_fallback_ocr",
+            "signal_text_chars": 0,
+            "signal_has_image": False,
+        }
+        for _ in range(total_pages)
+    ]
+    try:
+        page_signals = inspect_pdf_pages(temp_pdf)
+    except Exception:
+        return page_plan
+    for signal in page_signals:
+        page_index = int(signal.get("page_index") or 0)
+        if page_index < 0 or page_index >= total_pages:
+            continue
+        text_char_count = int(signal.get("text_char_count") or 0)
+        has_image = bool(signal.get("has_image"))
+        decision, reason = mixed_page_ocr_decision(
+            text_char_count=text_char_count,
+            has_image=has_image,
+            text_page_min_chars=text_page_min_chars,
+            low_text_max_chars=low_text_max_chars,
+        )
+        if has_image and decision != "ocr":
+            decision = "ocr"
+            reason = "image_detected_trigger"
+        page_plan[page_index] = {
+            "ocr_decision": decision,
+            "ocr_reason": reason,
+            "signal_text_chars": text_char_count,
+            "signal_has_image": has_image,
+        }
+    return page_plan
+
+
+def _build_page_record(page_index, page_plan):
+    return {
+        "page_index": page_index,
+        "text": "",
+        "confidence": None,
+        "ocr_decision": page_plan["ocr_decision"],
+        "ocr_reason": page_plan["ocr_reason"],
+        "signal_text_chars": page_plan["signal_text_chars"],
+        "signal_has_image": page_plan["signal_has_image"],
+    }
+
+
 def _ocr_with_tesseract(
     record,
     classification,
@@ -196,10 +278,10 @@ def _ocr_with_tesseract(
     page_timeout,
     page_workers,
     skip_low_signal_bytes,
+    mixed_ocr_mode,
+    text_page_min_chars,
+    low_text_max_chars,
 ):
-    if not _ensure_engine_dependencies():
-        return _pending_record(record, classification, "MissingTesseractOrPdftoppm")
-
     temp_pdf = None
     temp_dir = tempfile.TemporaryDirectory()
     errors = None
@@ -218,8 +300,23 @@ def _ocr_with_tesseract(
             page_workers = 1
         batch_size = max(1, page_workers * 2)
 
-        def _ocr_page(page_index):
-            image_path = f"{render_prefix}-{page_index + 1}.png"
+        if classification == "mixed" and mixed_ocr_mode == "image-heavy":
+            page_plan = _mixed_image_heavy_page_plan(
+                temp_pdf,
+                total_pages,
+                text_page_min_chars=text_page_min_chars,
+                low_text_max_chars=low_text_max_chars,
+            )
+        else:
+            page_plan = _default_page_plan(classification, total_pages)
+
+        pages = [_build_page_record(page_index, page_plan[page_index]) for page_index in range(total_pages)]
+        pages_to_ocr = [page_index for page_index, plan in enumerate(page_plan) if plan["ocr_decision"] == "ocr"]
+
+        if pages_to_ocr and not _ensure_engine_dependencies():
+            return _pending_record(record, classification, "MissingTesseractOrPdftoppm")
+
+        def _ocr_page(page_index, image_path):
             try:
                 if not Path(image_path).is_file():
                     raise FileNotFoundError(image_path)
@@ -229,9 +326,7 @@ def _ocr_with_tesseract(
                         return (
                             page_index,
                             {
-                                "page_index": page_index,
                                 "text": "",
-                                "confidence": None,
                                 "errors": "SkippedLowSignal",
                             },
                             None,
@@ -255,20 +350,22 @@ def _ocr_with_tesseract(
                 text = ocr_run.stdout.decode("utf-8", errors="replace")
                 if text_dir:
                     text_path = _write_text_page(text_dir, record["file_id"], page_index, text)
-                    return page_index, {"page_index": page_index, "text_path": text_path, "confidence": None}, None
-                return page_index, {"page_index": page_index, "text": text, "confidence": None}, None
+                    return page_index, {"text_path": text_path}, None
+                return page_index, {"text": text}, None
             except (subprocess.SubprocessError, OSError):
                 return (
                     page_index,
-                    {"page_index": page_index, "text": "", "confidence": None, "errors": "OcrError"},
+                    {"text": "", "errors": "OcrError"},
                     "OcrError",
                 )
 
-        pages = [None] * total_pages
-        started_ocr = False
-        if page_workers <= 1 or total_pages <= 1:
-            for batch_start in range(1, total_pages + 1, batch_size):
-                batch_end = min(total_pages, batch_start + batch_size - 1)
+        page_numbers_to_ocr = sorted(page_index + 1 for page_index in pages_to_ocr)
+        render_chunks = list(_iter_render_chunks(page_numbers_to_ocr, batch_size))
+
+        if page_workers <= 1 or len(page_numbers_to_ocr) <= 1:
+            for chunk_index, chunk in enumerate(render_chunks):
+                batch_start = chunk[0]
+                batch_end = chunk[-1]
                 try:
                     render_prefix = _render_pdf_page_range(
                         temp_pdf,
@@ -278,32 +375,27 @@ def _ocr_with_tesseract(
                         batch_end,
                     )
                 except (subprocess.SubprocessError, OSError):
-                    if not started_ocr:
-                        return _pending_record(record, classification, "OcrError")
                     errors = "OcrError"
-                    for page_number in range(batch_start, total_pages + 1):
-                        pages[page_number - 1] = {
-                            "page_index": page_number - 1,
-                            "text": "",
-                            "confidence": None,
-                            "errors": "OcrError",
-                        }
+                    for pending_chunk in render_chunks[chunk_index:]:
+                        for page_number in pending_chunk:
+                            pages[page_number - 1]["errors"] = "OcrError"
                     break
-                for page_number in range(batch_start, batch_end + 1):
+                for page_number in chunk:
                     page_index = page_number - 1
-                    page_index, page_record, page_error = _ocr_page(page_index)
-                    started_ocr = True
-                    pages[page_index] = page_record
+                    image_path = f"{render_prefix}-{page_number}.png"
+                    page_index, page_record, page_error = _ocr_page(page_index, image_path)
+                    pages[page_index].update(page_record)
                     if page_error:
                         errors = "OcrError"
                     try:
-                        os.remove(f"{render_prefix}-{page_number}.png")
+                        os.remove(image_path)
                     except OSError:
                         pass
         else:
             with ThreadPoolExecutor(max_workers=page_workers) as executor:
-                for batch_start in range(1, total_pages + 1, batch_size):
-                    batch_end = min(total_pages, batch_start + batch_size - 1)
+                for chunk_index, chunk in enumerate(render_chunks):
+                    batch_start = chunk[0]
+                    batch_end = chunk[-1]
                     try:
                         render_prefix = _render_pdf_page_range(
                             temp_pdf,
@@ -313,28 +405,22 @@ def _ocr_with_tesseract(
                             batch_end,
                         )
                     except (subprocess.SubprocessError, OSError):
-                        if not started_ocr:
-                            return _pending_record(record, classification, "OcrError")
                         errors = "OcrError"
-                        for page_number in range(batch_start, total_pages + 1):
-                            pages[page_number - 1] = {
-                                "page_index": page_number - 1,
-                                "text": "",
-                                "confidence": None,
-                                "errors": "OcrError",
-                            }
+                        for pending_chunk in render_chunks[chunk_index:]:
+                            for page_number in pending_chunk:
+                                pages[page_number - 1]["errors"] = "OcrError"
                         break
                     futures = set()
-                    for page_number in range(batch_start, batch_end + 1):
+                    for page_number in chunk:
                         page_index = page_number - 1
-                        futures.add(executor.submit(_ocr_page, page_index))
+                        image_path = f"{render_prefix}-{page_number}.png"
+                        futures.add(executor.submit(_ocr_page, page_index, image_path))
                     for done in as_completed(futures):
                         page_index, page_record, page_error = done.result()
-                        started_ocr = True
-                        pages[page_index] = page_record
+                        pages[page_index].update(page_record)
                         if page_error:
                             errors = "OcrError"
-                    for page_number in range(batch_start, batch_end + 1):
+                    for page_number in chunk:
                         try:
                             os.remove(f"{render_prefix}-{page_number}.png")
                         except OSError:
@@ -378,6 +464,9 @@ def build_phase2(
     page_timeout=120,
     page_workers=1,
     skip_low_signal_bytes=0,
+    mixed_ocr_mode="image-heavy",
+    text_page_min_chars=TEXT_PAGE_MIN_CHARS,
+    low_text_max_chars=LOW_TEXT_MAX_CHARS,
     workers=1,
     ordered=False,
     progress_interval=0,
@@ -428,6 +517,8 @@ def build_phase2(
         workers = 1
     requested_page_workers = page_workers
     max_page_workers = max(1, cpu_count // workers)
+    if mixed_ocr_mode not in ("all", "image-heavy"):
+        raise SystemExit("--mixed-ocr-mode must be one of: all, image-heavy")
     if requested_page_workers > max_page_workers:
         page_workers = max_page_workers
         print(
@@ -458,6 +549,9 @@ def build_phase2(
             page_timeout=page_timeout,
             page_workers=page_workers,
             skip_low_signal_bytes=skip_low_signal_bytes,
+            mixed_ocr_mode=mixed_ocr_mode,
+            text_page_min_chars=text_page_min_chars,
+            low_text_max_chars=low_text_max_chars,
         )
 
     with output_path.open(output_mode, encoding="utf-8") as out_handle:
@@ -639,6 +733,24 @@ def _parse_args():
     )
     parser.add_argument("--lang", default="eng", help="OCR language (tesseract).")
     parser.add_argument("--dpi", type=int, default=300, help="Render DPI.")
+    parser.add_argument(
+        "--mixed-ocr-mode",
+        default="image-heavy",
+        choices=("all", "image-heavy"),
+        help="For mixed PDFs, OCR all pages or only low-text/image-heavy pages.",
+    )
+    parser.add_argument(
+        "--text-page-min-chars",
+        type=int,
+        default=TEXT_PAGE_MIN_CHARS,
+        help="Text chars threshold for considering a mixed page text-bearing.",
+    )
+    parser.add_argument(
+        "--low-text-max-chars",
+        type=int,
+        default=LOW_TEXT_MAX_CHARS,
+        help="Max text chars to treat a mixed page as low-text for OCR routing.",
+    )
     parser.add_argument("--max-pages", type=int, default=None, help="Max pages to OCR.")
     parser.add_argument(
         "--text-dir",
@@ -694,6 +806,9 @@ def main():
         engine=args.engine,
         lang=args.lang,
         dpi=args.dpi,
+        mixed_ocr_mode=args.mixed_ocr_mode,
+        text_page_min_chars=args.text_page_min_chars,
+        low_text_max_chars=args.low_text_max_chars,
         max_pages=args.max_pages,
         text_dir=args.text_dir,
         page_timeout=args.page_timeout,
