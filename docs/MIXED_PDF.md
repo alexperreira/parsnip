@@ -109,11 +109,11 @@ Target file:
 - `src/file_parser/phase7_validate.py`
 
 Tasks:
-- [ ] Add counters for Phase 3 page sources:
+- [x] Add counters for Phase 3 page sources:
   - `phase3_pages_pdf_text`, `phase3_pages_ocr`, `phase3_pages_low_quality`.
-- [ ] Add percentages:
+- [x] Add percentages:
   - `phase3_ocr_page_rate_pct`, `phase3_low_quality_page_rate_pct`.
-- [ ] Add warning when low-quality page rate crosses a fixed threshold (for example `>30%`).
+- [x] Add warning when low-quality page rate crosses a fixed threshold (for example `>30%`).
 
 ## 5) Tests
 Target files:

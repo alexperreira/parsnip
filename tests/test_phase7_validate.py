@@ -82,15 +82,15 @@ class Phase7ValidateTest(unittest.TestCase):
                     {
                         "file_id": "a",
                         "pages": [
-                            {"page_index": 0, "text": "alpha"},
-                            {"page_index": 1, "text": "  "},
+                            {"page_index": 0, "text": "alpha", "source": "pdf_text", "quality_flags": []},
+                            {"page_index": 1, "text": "  ", "source": "ocr", "quality_flags": ["empty_text"]},
                         ],
                     },
                     {
                         "file_id": "b",
                         "pages": [
-                            {"page_index": 0, "text": ""},
-                            {"page_index": 1, "text": "omega"},
+                            {"page_index": 0, "text": "", "source": "ocr", "quality_flags": ["empty_text", "ocr_error"]},
+                            {"page_index": 1, "text": "omega", "source": "ocr", "quality_flags": []},
                         ],
                     },
                 ],
@@ -117,8 +117,14 @@ class Phase7ValidateTest(unittest.TestCase):
             self.assertEqual(summary["phase3_total_pages"], 4)
             self.assertEqual(summary["phase3_empty_text_pages"], 2)
             self.assertEqual(summary["empty_text_page_rate_pct"], 50.0)
+            self.assertEqual(summary["phase3_pages_pdf_text"], 1)
+            self.assertEqual(summary["phase3_pages_ocr"], 3)
+            self.assertEqual(summary["phase3_pages_low_quality"], 2)
+            self.assertEqual(summary["phase3_ocr_page_rate_pct"], 75.0)
+            self.assertEqual(summary["phase3_low_quality_page_rate_pct"], 50.0)
             self.assertEqual(summary["json_decode_errors"]["chunks"], 1)
-            self.assertEqual(summary["warnings"], [])
+            self.assertEqual(len(summary["warnings"]), 1)
+            self.assertIn("phase3_low_quality_page_rate_high", summary["warnings"][0])
 
     def test_build_phase7_warns_on_chunk_record_mismatch(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -241,6 +247,79 @@ class Phase7ValidateTest(unittest.TestCase):
                     events_path=events_path,
                     phase3_path=phase3_dir,
                 )
+
+    def test_build_phase7_low_quality_warning_threshold(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            chunks_path = root / "chunks.jsonl"
+            entities_path = root / "entities.jsonl"
+            events_path = root / "events.jsonl"
+            phase3_dir = root / "text"
+            phase3_dir.mkdir(parents=True, exist_ok=True)
+
+            self._write_jsonl(chunks_path, [{"chunk_id": "a:0-0", "file_id": "a"}])
+            self._write_jsonl(entities_path, [{"chunk_id": "a:0-0", "items": []}])
+            self._write_jsonl(events_path, [{"chunk_id": "a:0-0", "items": []}])
+
+            high_path = phase3_dir / "docs_0001.jsonl.gz"
+            self._write_jsonl_gz(
+                high_path,
+                [
+                    {
+                        "file_id": "a",
+                        "pages": [
+                            {"page_index": 0, "text": "good", "source": "pdf_text", "quality_flags": []},
+                            {"page_index": 1, "text": "", "source": "ocr", "quality_flags": ["empty_text"]},
+                            {"page_index": 2, "text": "", "source": "ocr", "quality_flags": ["empty_text"]},
+                            {"page_index": 3, "text": "", "source": "ocr", "quality_flags": ["low_text"]},
+                            {"page_index": 4, "text": "good", "source": "ocr", "quality_flags": []},
+                            {"page_index": 5, "text": "good", "source": "ocr", "quality_flags": []},
+                            {"page_index": 6, "text": "good", "source": "ocr", "quality_flags": []},
+                            {"page_index": 7, "text": "good", "source": "ocr", "quality_flags": []},
+                            {"page_index": 8, "text": "good", "source": "ocr", "quality_flags": []},
+                            {"page_index": 9, "text": "good", "source": "ocr", "quality_flags": []},
+                        ],
+                    }
+                ],
+            )
+            summary = build_phase7(
+                chunks_path=chunks_path,
+                entities_path=entities_path,
+                events_path=events_path,
+                phase3_path=phase3_dir,
+            )
+            self.assertEqual(summary["phase3_low_quality_page_rate_pct"], 30.0)
+            self.assertEqual(summary["warnings"], [])
+
+            self._write_jsonl_gz(
+                high_path,
+                [
+                    {
+                        "file_id": "a",
+                        "pages": [
+                            {"page_index": 0, "text": "good", "source": "pdf_text", "quality_flags": []},
+                            {"page_index": 1, "text": "", "source": "ocr", "quality_flags": ["empty_text"]},
+                            {"page_index": 2, "text": "", "source": "ocr", "quality_flags": ["empty_text"]},
+                            {"page_index": 3, "text": "", "source": "ocr", "quality_flags": ["low_text"]},
+                            {"page_index": 4, "text": "", "source": "ocr", "quality_flags": ["ocr_error"]},
+                            {"page_index": 5, "text": "good", "source": "ocr", "quality_flags": []},
+                            {"page_index": 6, "text": "good", "source": "ocr", "quality_flags": []},
+                            {"page_index": 7, "text": "good", "source": "ocr", "quality_flags": []},
+                            {"page_index": 8, "text": "good", "source": "ocr", "quality_flags": []},
+                            {"page_index": 9, "text": "good", "source": "ocr", "quality_flags": []},
+                        ],
+                    }
+                ],
+            )
+            summary = build_phase7(
+                chunks_path=chunks_path,
+                entities_path=entities_path,
+                events_path=events_path,
+                phase3_path=phase3_dir,
+            )
+            self.assertEqual(summary["phase3_low_quality_page_rate_pct"], 40.0)
+            self.assertEqual(len(summary["warnings"]), 1)
+            self.assertIn("phase3_low_quality_page_rate_high", summary["warnings"][0])
 
 
 if __name__ == "__main__":

@@ -4,6 +4,9 @@ from pathlib import Path
 
 from file_parser.compress_io import open_text_reader
 
+LOW_QUALITY_WARN_RATE_PCT = 30.0
+LOW_QUALITY_FLAGS = {"empty_text", "low_text", "ocr_error", "missing_source"}
+
 
 def _safe_pct(numerator, denominator):
     if denominator <= 0:
@@ -117,9 +120,19 @@ def _count_invalid_json_rate(paths):
     }
 
 
-def _count_empty_text_pages(phase3_path):
+def _is_low_quality_page(page, text):
+    flags = page.get("quality_flags")
+    if isinstance(flags, list) and any(flag in LOW_QUALITY_FLAGS for flag in flags):
+        return True
+    return not str(text).strip()
+
+
+def _count_phase3_pages(phase3_path):
     total_pages = 0
     empty_text_pages = 0
+    pages_pdf_text = 0
+    pages_ocr = 0
+    pages_low_quality = 0
     json_decode_errors = 0
     docs = 0
     for shard_path in _phase3_shards(phase3_path):
@@ -140,12 +153,22 @@ def _count_empty_text_pages(phase3_path):
                     continue
                 total_pages += 1
                 text = page.get("text") or ""
+                source = page.get("source")
+                if source == "pdf_text":
+                    pages_pdf_text += 1
+                elif source == "ocr":
+                    pages_ocr += 1
                 if not str(text).strip():
                     empty_text_pages += 1
+                if _is_low_quality_page(page, text):
+                    pages_low_quality += 1
     return {
         "docs": docs,
         "total_pages": total_pages,
         "empty_text_pages": empty_text_pages,
+        "pages_pdf_text": pages_pdf_text,
+        "pages_ocr": pages_ocr,
+        "pages_low_quality": pages_low_quality,
         "json_decode_errors": json_decode_errors,
     }
 
@@ -171,25 +194,34 @@ def build_phase7(chunks_path, entities_path, events_path, phase3_path, conversat
             raise SystemExit(f"Required input is missing: {conversations_path}")
         llm_paths.append(conversations_path)
     invalid_json_counts = _count_invalid_json_rate(llm_paths)
-    empty_page_counts = _count_empty_text_pages(phase3_path)
+    phase3_page_counts = _count_phase3_pages(phase3_path)
 
     total_chunks = chunk_counts["total_chunks"]
     entity_records = entity_counts["records"]
     event_records = event_counts["records"]
-    chunk_alignment_warnings = []
+    warnings = []
     if entity_records != total_chunks:
-        chunk_alignment_warnings.append(
+        warnings.append(
             (
                 "entities_record_count_mismatch: "
                 f"entities_records={entity_records}, total_chunks={total_chunks}"
             )
         )
     if event_records != total_chunks:
-        chunk_alignment_warnings.append(
+        warnings.append(
             (
                 "events_record_count_mismatch: "
                 f"events_records={event_records}, total_chunks={total_chunks}"
             )
+        )
+    low_quality_page_rate_pct = _safe_pct(
+        phase3_page_counts["pages_low_quality"], phase3_page_counts["total_pages"]
+    )
+    if low_quality_page_rate_pct > LOW_QUALITY_WARN_RATE_PCT:
+        warnings.append(
+            "phase3_low_quality_page_rate_high: "
+            f"phase3_low_quality_page_rate_pct={low_quality_page_rate_pct}, "
+            f"threshold_pct={LOW_QUALITY_WARN_RATE_PCT}"
         )
 
     return {
@@ -206,20 +238,27 @@ def build_phase7(chunks_path, entities_path, events_path, phase3_path, conversat
             invalid_json_counts["invalid_json_records"],
             invalid_json_counts["total_records"],
         ),
-        "phase3_docs": empty_page_counts["docs"],
-        "phase3_total_pages": empty_page_counts["total_pages"],
-        "phase3_empty_text_pages": empty_page_counts["empty_text_pages"],
+        "phase3_docs": phase3_page_counts["docs"],
+        "phase3_total_pages": phase3_page_counts["total_pages"],
+        "phase3_empty_text_pages": phase3_page_counts["empty_text_pages"],
+        "phase3_pages_pdf_text": phase3_page_counts["pages_pdf_text"],
+        "phase3_pages_ocr": phase3_page_counts["pages_ocr"],
+        "phase3_pages_low_quality": phase3_page_counts["pages_low_quality"],
         "empty_text_page_rate_pct": _safe_pct(
-            empty_page_counts["empty_text_pages"], empty_page_counts["total_pages"]
+            phase3_page_counts["empty_text_pages"], phase3_page_counts["total_pages"]
         ),
+        "phase3_ocr_page_rate_pct": _safe_pct(
+            phase3_page_counts["pages_ocr"], phase3_page_counts["total_pages"]
+        ),
+        "phase3_low_quality_page_rate_pct": low_quality_page_rate_pct,
         "json_decode_errors": {
             "chunks": chunk_counts["json_decode_errors"],
             "entities": entity_counts["json_decode_errors"],
             "events": event_counts["json_decode_errors"],
             "llm_outputs": invalid_json_counts["json_decode_errors"],
-            "phase3": empty_page_counts["json_decode_errors"],
+            "phase3": phase3_page_counts["json_decode_errors"],
         },
-        "warnings": chunk_alignment_warnings,
+        "warnings": warnings,
     }
 
 
@@ -243,6 +282,16 @@ def _print_summary(summary):
         "  empty_text_page_rate_pct: "
         f"{summary['empty_text_page_rate_pct']} "
         f"({summary['phase3_empty_text_pages']}/{summary['phase3_total_pages']})"
+    )
+    print(
+        "  phase3_ocr_page_rate_pct: "
+        f"{summary['phase3_ocr_page_rate_pct']} "
+        f"({summary['phase3_pages_ocr']}/{summary['phase3_total_pages']})"
+    )
+    print(
+        "  phase3_low_quality_page_rate_pct: "
+        f"{summary['phase3_low_quality_page_rate_pct']} "
+        f"({summary['phase3_pages_low_quality']}/{summary['phase3_total_pages']})"
     )
     decode_errors = summary["json_decode_errors"]
     if any(value > 0 for value in decode_errors.values()):
