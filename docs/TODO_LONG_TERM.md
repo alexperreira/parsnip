@@ -54,6 +54,7 @@ Build logic to:
 
 - Move from SQLite tables to a graph store.
 - Represent relationships between people, events, and cases.
+- Storage staging note: see `docs/GRAPH_DB_DECISION.md`.
 
 ---
 
