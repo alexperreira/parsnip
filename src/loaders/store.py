@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 
 def connect_db(db_path):
@@ -14,9 +14,32 @@ def connect_db(db_path):
 
 def ensure_schema(conn, overwrite=False):
     if overwrite:
-        for table in ("mentions", "entities", "events", "conversations", "meta"):
+        for table in (
+            "identity_signals",
+            "mentions",
+            "entities",
+            "events",
+            "conversations",
+            "meta",
+        ):
             conn.execute(f"DROP TABLE IF EXISTS {table}")
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS identity_signals ("
+        "signal_id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "person_text TEXT NOT NULL,"
+        "attribute TEXT NOT NULL,"
+        "value TEXT NOT NULL,"
+        "value_norm TEXT,"
+        "confidence REAL,"
+        "file_id TEXT NOT NULL,"
+        "chunk_id TEXT NOT NULL,"
+        "page_start INTEGER,"
+        "page_end INTEGER,"
+        "quote TEXT,"
+        "UNIQUE(person_text, attribute, value, confidence, file_id, chunk_id, page_start, page_end, quote)"
+        ")"
+    )
     conn.execute(
         "CREATE TABLE IF NOT EXISTS entities ("
         "entity_id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -91,6 +114,14 @@ def ensure_schema(conn, overwrite=False):
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_mentions_entity ON mentions(entity)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_mentions_file_chunk ON mentions(file_id, chunk_id)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_identity_signals_file_chunk "
+        "ON identity_signals(file_id, chunk_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_identity_signals_attr_value_norm "
+        "ON identity_signals(attribute, value_norm)"
+    )
     conn.commit()
 
 

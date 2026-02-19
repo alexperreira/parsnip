@@ -7,6 +7,7 @@ from pathlib import Path
 from loaders.load_conversations import build_load_conversations
 from loaders.load_entities import build_load_entities
 from loaders.load_events import build_load_events
+from loaders.store import SCHEMA_VERSION
 
 
 class Phase6LoadersTest(unittest.TestCase):
@@ -62,7 +63,7 @@ class Phase6LoadersTest(unittest.TestCase):
                 "SELECT value FROM meta WHERE key='schema_version'"
             ).fetchone()
             self.assertIsNotNone(schema_version)
-            self.assertEqual(schema_version[0], "1")
+            self.assertEqual(schema_version[0], SCHEMA_VERSION)
             conn.close()
 
     def test_entities_validation_page_range_and_idempotency(self):

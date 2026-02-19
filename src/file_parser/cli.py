@@ -17,6 +17,7 @@ from llm.extract_identity_signals import main as llm_identity_signals_main
 from loaders.load_conversations import main as load_conversations_main
 from loaders.load_entities import main as load_entities_main
 from loaders.load_events import main as load_events_main
+from loaders.load_identity_signals import main as load_identity_signals_main
 from text_extraction.phase3_extract_text import main as phase3_main
 
 app = typer.Typer(
@@ -136,6 +137,11 @@ def load_events(ctx: typer.Context):
 @load_app.command("conversations", help="Load conversations JSONL into SQLite.")
 def load_conversations(ctx: typer.Context):
     _dispatch_to_main("load conversations", list(ctx.args), load_conversations_main)
+
+
+@load_app.command("identity-signals", help="Load identity signals JSONL into SQLite.")
+def load_identity_signals(ctx: typer.Context):
+    _dispatch_to_main("load identity-signals", list(ctx.args), load_identity_signals_main)
 
 
 @load_app.command("all", help="Load entities, events, and conversations into SQLite.")

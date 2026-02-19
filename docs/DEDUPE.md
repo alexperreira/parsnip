@@ -227,9 +227,9 @@ Error handling:
 [x] Keep temperature 0 and fail-soft error recording like other LLM extractors.
 
 ### 2) Add Loader + Schema v2
-[ ] Bump `SCHEMA_VERSION` and extend `ensure_schema` to create new tables/indexes.
-[ ] Add `src/loaders/load_identity_signals.py` mirroring Phase 6 loader patterns.
-[ ] Add `fileparse load identity-signals` (or include in `load all` via a flag).
+[x] Bump `SCHEMA_VERSION` and extend `ensure_schema` to create new tables/indexes.
+[x] Add `src/loaders/load_identity_signals.py` mirroring Phase 6 loader patterns.
+[x] Add `fileparse load identity-signals` (or include in `load all` via a flag).
 
 ### 3) Build Resolver
 [ ] Add `src/entity_resolution/phase8_resolve_people.py` (or similar).
