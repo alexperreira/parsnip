@@ -36,9 +36,14 @@ PYTHONPATH=src python -m file_parser.phase2_ocr --input /path/to/input --phase1 
 - Keep changes scoped and avoid new dependencies unless necessary.
 - If behavior is unclear, ask or leave a TODO rather than guessing.
 
+## Testing
+- pypdf and other tools will often be missing from environment.
+- start python venv and install requirements to run tests.
+
 ## Handoff after changes
 - Summary of changes.
 - Files changed.
 - How to run.
 - How to test (at least one command).
+- Tests passed.
 - Known limitations or edge cases.

@@ -54,6 +54,10 @@ This repo is being developed with Codex CLI. These rules exist to prevent costly
 - Track: files scanned, parsed by type, failures by type, time per stage.
 - Error samples must be redacted.
 
+## Testing
+- pypdf and other tools will often be missing from environment.
+- start python venv and install requirements to run tests.
+
 ## Expected “handoff” after changes
 
 Whenever code is changed, the assistant must end with:
@@ -61,6 +65,7 @@ Whenever code is changed, the assistant must end with:
 - Files changed
 - How to run
 - How to test (at least one concrete command)
+- Tests passed
 - Known limitations / edge cases
 
 ## Additional collaboration and git rules
