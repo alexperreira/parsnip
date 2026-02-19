@@ -12,6 +12,8 @@ from file_parser.compress_io import (
     shard_compression_from_name,
     shard_suffix_for_compression,
 )
+from file_parser.phase1_detect import LOW_TEXT_MAX_CHARS
+from file_parser.phase1_detect import TEXT_PAGE_MIN_CHARS
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
@@ -284,22 +286,128 @@ def _pages_from_ocr(phase2_record, page_count):
     return pages
 
 
+def _merge_mixed_pages(pdf_pages, phase2_record, page_count, text_page_min_chars):
+    pdf_pages = pdf_pages or []
+    pdf_by_index = {
+        int(page.get("page_index") or 0): page for page in pdf_pages if isinstance(page, dict)
+    }
+
+    total_pages = int(page_count or 0)
+    phase2_pages = []
+    if isinstance(phase2_record, dict):
+        candidate_pages = phase2_record.get("pages")
+        if isinstance(candidate_pages, list):
+            phase2_pages = candidate_pages
+    if total_pages <= 0:
+        total_pages = max(len(pdf_pages), len(phase2_pages))
+    ocr_pages = _pages_from_ocr({"pages": phase2_pages}, total_pages)
+
+    merged_pages = []
+    for page_index in range(total_pages):
+        pdf_page = pdf_by_index.get(page_index) or {}
+        pdf_text = pdf_page.get("text", "") or ""
+        pdf_text_chars = len(pdf_text)
+        if pdf_text_chars >= int(text_page_min_chars):
+            merged_pages.append(
+                {
+                    "page_index": page_index,
+                    "text": pdf_text,
+                    "source": "pdf_text",
+                    "confidence": None,
+                    "review_required": False,
+                    "review_reason": None,
+                }
+            )
+            continue
+
+        ocr_page = ocr_pages[page_index] if page_index < len(ocr_pages) else {}
+        ocr_text = ocr_page.get("text", "") or ""
+        if ocr_text.strip():
+            merged_pages.append(
+                {
+                    "page_index": page_index,
+                    "text": ocr_text,
+                    "source": "ocr",
+                    "confidence": ocr_page.get("confidence"),
+                    "review_required": bool(ocr_page.get("review_required")),
+                    "review_reason": ocr_page.get("review_reason"),
+                }
+            )
+            continue
+
+        review_reason = ocr_page.get("review_reason")
+        if review_reason == "missing_text_path":
+            review_reason = "missing_mixed_text_sources"
+        if not review_reason:
+            review_reason = "missing_phase2_page" if page_index >= len(phase2_pages) else "missing_ocr_text"
+
+        merged_pages.append(
+            {
+                "page_index": page_index,
+                "text": "",
+                "source": "ocr",
+                "confidence": ocr_page.get("confidence"),
+                "review_required": True,
+                "review_reason": review_reason,
+            }
+        )
+    return merged_pages
+
+
+def _add_page_quality_fields(pages):
+    for page in pages:
+        text = page.get("text", "") or ""
+        text_char_count = len(text)
+        flags = []
+        if page.get("source") not in {"pdf_text", "ocr"}:
+            flags.append("missing_source")
+        if not text.strip():
+            flags.append("empty_text")
+        elif text_char_count <= int(LOW_TEXT_MAX_CHARS):
+            flags.append("low_text")
+        if page.get("source") == "ocr" and page.get("review_reason") in {
+            "unreadable_text_path",
+            "missing_text_path",
+        }:
+            flags.append("ocr_error")
+
+        if "empty_text" in flags:
+            score = 0.0
+        else:
+            length_score = min(text_char_count / float(TEXT_PAGE_MIN_CHARS), 1.0)
+            confidence = page.get("confidence")
+            if confidence is None:
+                confidence_score = 1.0
+            else:
+                try:
+                    confidence_score = max(0.0, min(float(confidence), 1.0))
+                except (TypeError, ValueError):
+                    confidence_score = 0.0
+            score = (length_score + confidence_score) / 2.0
+            if "low_text" in flags:
+                score *= 0.6
+            if page.get("review_required"):
+                score *= 0.7
+            if "ocr_error" in flags or "missing_source" in flags:
+                score = min(score, 0.2)
+
+        page["quality_score_page"] = round(max(0.0, min(score, 1.0)), 6)
+        page["quality_flags"] = flags
+        page["text_char_count"] = text_char_count
+    return pages
+
+
 def _estimate_quality(pages):
     if not pages:
         return 0.0
-    non_empty = sum(1 for page in pages if page.get("text"))
-    text_ratio = non_empty / len(pages)
-    confidences = [
-        page.get("confidence")
-        for page in pages
-        if page.get("confidence") is not None
-    ]
-    if not confidences:
-        return round(text_ratio, 6)
-    avg_conf = sum(confidences) / len(confidences)
-    if avg_conf > 1:
-        avg_conf = 1.0
-    return round((text_ratio + avg_conf) / 2, 6)
+    scores = []
+    for page in pages:
+        try:
+            score = float(page.get("quality_score_page", 0.0))
+        except (TypeError, ValueError):
+            score = 0.0
+        scores.append(max(0.0, min(score, 1.0)))
+    return round(sum(scores) / len(scores), 6)
 
 
 def _open_shard(output_dir, shard_index, compression, zstd_level):
@@ -517,12 +625,25 @@ def build_phase3(
                     pages = _extract_pdf_text(record, root_path)
                     if pages is None:
                         errors += 1
+                elif classification == "mixed":
+                    phase2_record = phase2_index.get(file_id)
+                    pdf_pages = _extract_pdf_text(record, root_path)
+                    if pdf_pages is None:
+                        errors += 1
+                        pdf_pages = []
+                    pages = _merge_mixed_pages(
+                        pdf_pages,
+                        phase2_record,
+                        page_count=page_count,
+                        text_page_min_chars=TEXT_PAGE_MIN_CHARS,
+                    )
                 if pages is None:
                     phase2_record = phase2_index.get(file_id)
                     if phase2_record is None:
                         pages = _pages_from_ocr({}, page_count)
                     else:
                         pages = _pages_from_ocr(phase2_record, page_count)
+                pages = _add_page_quality_fields(pages)
 
                 if shard_handle is None:
                     shard_index += 1
