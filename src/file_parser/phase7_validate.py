@@ -1,5 +1,6 @@
 import argparse
 import json
+import sqlite3
 from pathlib import Path
 
 from file_parser.compress_io import open_text_reader
@@ -335,6 +336,11 @@ def _parse_args():
         help="Phase 3 output directory or shard file (default: output/text).",
     )
     parser.add_argument(
+        "--db",
+        default=None,
+        help="Optional SQLite DB path to sanity-check derived tables (no content is logged).",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Print machine-readable JSON summary.",
@@ -351,10 +357,66 @@ def main():
         phase3_path=args.phase3,
         conversations_path=args.conversations,
     )
+    if args.db:
+        summary["db"] = _db_sanity_checks(args.db)
     if args.json:
         print(json.dumps(summary, ensure_ascii=True, indent=2))
     else:
         _print_summary(summary)
+
+
+def _db_sanity_checks(db_path: str):
+    path = Path(db_path)
+    if not path.exists():
+        raise SystemExit(f"DB not found: {path}")
+    conn = sqlite3.connect(path)
+    try:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        }
+        needed = {
+            "conversation_segments",
+            "conversation_threads",
+            "conversation_thread_segments",
+            "conversation_thread_participants",
+        }
+        present = needed.issubset(tables)
+        if not present:
+            return {
+                "enabled": True,
+                "present": False,
+                "missing_tables": sorted(list(needed - tables)),
+            }
+        segments = conn.execute("SELECT COUNT(*) FROM conversation_segments").fetchone()[0]
+        threads = conn.execute("SELECT COUNT(*) FROM conversation_threads").fetchone()[0]
+        memberships = conn.execute("SELECT COUNT(*) FROM conversation_thread_segments").fetchone()[0]
+        participants = conn.execute("SELECT COUNT(*) FROM conversation_thread_participants").fetchone()[0]
+
+        missing_segments = conn.execute(
+            "SELECT COUNT(*) "
+            "FROM conversation_thread_segments ts "
+            "LEFT JOIN conversation_segments s ON s.segment_id = ts.segment_id "
+            "WHERE s.segment_id IS NULL"
+        ).fetchone()[0]
+        invalid_participant_keys = conn.execute(
+            "SELECT COUNT(*) FROM conversation_thread_participants "
+            "WHERE participant_key NOT LIKE 'p:%' AND participant_key NOT LIKE 's:%'"
+        ).fetchone()[0]
+        return {
+            "enabled": True,
+            "present": True,
+            "conversation_segments": int(segments),
+            "conversation_threads": int(threads),
+            "conversation_thread_segments": int(memberships),
+            "conversation_thread_participants": int(participants),
+            "missing_thread_segments": int(missing_segments),
+            "invalid_participant_keys": int(invalid_participant_keys),
+        }
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

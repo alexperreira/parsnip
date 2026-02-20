@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 
 
 def connect_db(db_path):
@@ -15,6 +15,11 @@ def connect_db(db_path):
 def ensure_schema(conn, overwrite=False):
     if overwrite:
         for table in (
+            "conversation_thread_participants",
+            "conversation_thread_segments",
+            "conversation_threads",
+            "conversation_thread_edges",
+            "conversation_segments",
             "event_cases",
             "event_times",
             "files",
@@ -159,6 +164,62 @@ def ensure_schema(conn, overwrite=False):
         "UNIQUE(speaker, confidence, file_id, chunk_id, page_start, page_end, quote)"
         ")"
     )
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS conversation_segments ("
+        "segment_id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "file_id TEXT NOT NULL,"
+        "chunk_id TEXT NOT NULL,"
+        "page_start INTEGER,"
+        "page_end INTEGER,"
+        "case_id_norm TEXT NOT NULL,"
+        "case_source TEXT NOT NULL,"
+        "anchor_date TEXT,"
+        "utterance_count INTEGER NOT NULL,"
+        "participants_json TEXT NOT NULL,"
+        "features_json TEXT NOT NULL,"
+        "UNIQUE(file_id, chunk_id)"
+        ")"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS conversation_thread_edges ("
+        "left_segment_id INTEGER NOT NULL,"
+        "right_segment_id INTEGER NOT NULL,"
+        "score REAL NOT NULL,"
+        "decision TEXT NOT NULL,"
+        "reasons_json TEXT NOT NULL,"
+        "PRIMARY KEY(left_segment_id, right_segment_id)"
+        ")"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS conversation_threads ("
+        "thread_id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "case_id_norm TEXT NOT NULL,"
+        "thread_key TEXT NOT NULL,"
+        "label TEXT,"
+        "label_method TEXT NOT NULL,"
+        "created_utc TEXT NOT NULL,"
+        "UNIQUE(case_id_norm, thread_key)"
+        ")"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS conversation_thread_segments ("
+        "thread_id INTEGER NOT NULL,"
+        "segment_id INTEGER NOT NULL,"
+        "sort_key TEXT NOT NULL,"
+        "PRIMARY KEY(thread_id, segment_id)"
+        ")"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS conversation_thread_participants ("
+        "thread_id INTEGER NOT NULL,"
+        "participant_key TEXT NOT NULL,"
+        "person_id INTEGER,"
+        "speaker_norm TEXT,"
+        "source TEXT NOT NULL,"
+        "PRIMARY KEY(thread_id, participant_key)"
+        ")"
+    )
     conn.execute(
         "CREATE TABLE IF NOT EXISTS mentions ("
         "mention_id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -189,6 +250,24 @@ def ensure_schema(conn, overwrite=False):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_events_date ON events(date)")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_conversations_file_chunk ON conversations(file_id, chunk_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_conversation_segments_case ON conversation_segments(case_id_norm)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_conversation_segments_file_chunk "
+        "ON conversation_segments(file_id, chunk_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_conversation_threads_case ON conversation_threads(case_id_norm)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_conversation_thread_segments_segment "
+        "ON conversation_thread_segments(segment_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_conversation_thread_participants_person "
+        "ON conversation_thread_participants(person_id)"
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_mentions_entity ON mentions(entity)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_mentions_file_chunk ON mentions(file_id, chunk_id)")

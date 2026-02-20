@@ -22,6 +22,7 @@ from loaders.load_identity_signals import main as load_identity_signals_main
 from loaders.load_manifest import main as load_manifest_main
 from text_extraction.phase3_extract_text import main as phase3_main
 from timeline.phase9_stitch_timeline import main as timeline_main
+from conversation_threading.phase10_thread_conversations import main as thread_main
 
 app = typer.Typer(
     add_completion=False,
@@ -209,6 +210,11 @@ def timeline(ctx: typer.Context):
     _dispatch_to_main("timeline", list(ctx.args), timeline_main)
 
 
+@app.command("thread", help="Thread conversations across documents (Phase 10).")
+def thread(ctx: typer.Context):
+    _dispatch_to_main("thread", list(ctx.args), thread_main)
+
+
 @app.command("run", help="Run extract-text, chunk, llm, load, and validate steps.")
 def run(
     ctx: typer.Context,
@@ -217,7 +223,7 @@ def run(
     steps: str = typer.Option(
         "extract-text,chunk,llm,load,validate",
         "--steps",
-        help="Comma-separated steps: extract-text,chunk,llm,load,resolve,timeline,validate.",
+        help="Comma-separated steps: extract-text,chunk,llm,load,resolve,timeline,thread,validate.",
     ),
     no_interactive: bool = typer.Option(
         False,
@@ -299,6 +305,14 @@ def run(
         if manifest_path.exists():
             timeline_args.extend(["--manifest", str(manifest_path)])
         _dispatch_to_main("timeline", timeline_args, timeline_main)
+    if "thread" in selected:
+        thread_args = ["--db", str(db_path)]
+        if chunks_path.exists():
+            thread_args.extend(["--chunks", str(chunks_path)])
+        manifest_path = output_path / "manifest.jsonl"
+        if manifest_path.exists():
+            thread_args.extend(["--manifest", str(manifest_path)])
+        _dispatch_to_main("thread", thread_args, thread_main)
     if "validate" in selected:
         _dispatch_to_main(
             "validate",
