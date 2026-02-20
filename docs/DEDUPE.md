@@ -232,13 +232,13 @@ Error handling:
 [x] Add `fileparse load identity-signals` (or include in `load all` via a flag).
 
 ### 3) Build Resolver
-[ ] Add `src/entity_resolution/phase8_resolve_people.py` (or similar).
-[ ] Implement: build observations, normalize, candidate generation, scoring, union-find clustering.
-[ ] Store results in `person_clusters`, `person_cluster_members`, `person_resolution_edges`.
+[x] Add `src/entity_resolution/phase8_resolve_people.py` (or similar).
+[x] Implement: build observations, normalize, candidate generation, scoring, union-find clustering.
+[x] Store results in `person_clusters`, `person_cluster_members`, `person_resolution_edges`.
 
 ### 4) CLI Integration
-[ ] Add `fileparse resolve` command and help text.
-[ ] Consider `fileparse run --steps …` support for `resolve` (off by default until stable).
+[x] Add `fileparse resolve` command and help text.
+[x] Consider `fileparse run --steps …` support for `resolve` (off by default until stable).
 
 ### 5) Tests (Deterministic, No LLM Required)
 [ ] Add `tests/test_phase8_resolve_people.py` using a temp SQLite DB:

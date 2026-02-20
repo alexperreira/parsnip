@@ -10,6 +10,7 @@ from file_parser.phase2_ocr import main as phase2_main
 from file_parser.phase7_validate import main as phase7_main
 from file_parser.run_pipeline import main as pipeline_main
 from chunking.phase4_chunk import main as phase4_main
+from entity_resolution.phase8_resolve_people import main as resolve_people_main
 from llm.extract_conversations import main as llm_conversations_main
 from llm.extract_entities import main as llm_entities_main
 from llm.extract_events import main as llm_events_main
@@ -191,6 +192,11 @@ def validate(ctx: typer.Context):
     _dispatch_to_main("validate", list(ctx.args), phase7_main)
 
 
+@app.command("resolve", help="Run people entity resolution (Phase 8).")
+def resolve(ctx: typer.Context):
+    _dispatch_to_main("resolve", list(ctx.args), resolve_people_main)
+
+
 @app.command("run", help="Run extract-text, chunk, llm, load, and validate steps.")
 def run(
     ctx: typer.Context,
@@ -199,7 +205,7 @@ def run(
     steps: str = typer.Option(
         "extract-text,chunk,llm,load,validate",
         "--steps",
-        help="Comma-separated steps: extract-text,chunk,llm,load,validate.",
+        help="Comma-separated steps: extract-text,chunk,llm,load,resolve,validate.",
     ),
     no_interactive: bool = typer.Option(
         False,
@@ -266,6 +272,12 @@ def run(
             conversations_path,
             db_path,
             overwrite=False,
+        )
+    if "resolve" in selected:
+        _dispatch_to_main(
+            "resolve",
+            ["--db", str(db_path), "--reset"],
+            resolve_people_main,
         )
     if "validate" in selected:
         _dispatch_to_main(

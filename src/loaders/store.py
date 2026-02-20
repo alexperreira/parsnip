@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 
 
 def connect_db(db_path):
@@ -15,6 +15,10 @@ def connect_db(db_path):
 def ensure_schema(conn, overwrite=False):
     if overwrite:
         for table in (
+            "person_resolution_edges",
+            "person_cluster_members",
+            "person_clusters",
+            "person_observations",
             "identity_signals",
             "mentions",
             "entities",
@@ -23,6 +27,44 @@ def ensure_schema(conn, overwrite=False):
             "meta",
         ):
             conn.execute(f"DROP TABLE IF EXISTS {table}")
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS person_observations ("
+        "obs_id INTEGER PRIMARY KEY,"
+        "name TEXT NOT NULL,"
+        "name_norm TEXT NOT NULL,"
+        "file_id TEXT NOT NULL,"
+        "chunk_id TEXT NOT NULL,"
+        "page_start INTEGER,"
+        "page_end INTEGER,"
+        "UNIQUE(name_norm, file_id, chunk_id, page_start, page_end)"
+        ")"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS person_clusters ("
+        "person_id INTEGER PRIMARY KEY,"
+        "display_name TEXT NOT NULL,"
+        "display_name_norm TEXT NOT NULL,"
+        "dob TEXT"
+        ")"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS person_cluster_members ("
+        "person_id INTEGER NOT NULL,"
+        "obs_id INTEGER NOT NULL,"
+        "PRIMARY KEY(person_id, obs_id)"
+        ")"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS person_resolution_edges ("
+        "left_obs_id INTEGER NOT NULL,"
+        "right_obs_id INTEGER NOT NULL,"
+        "decision TEXT NOT NULL,"
+        "score REAL NOT NULL,"
+        "reasons_json TEXT NOT NULL,"
+        "PRIMARY KEY(left_obs_id, right_obs_id)"
+        ")"
+    )
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS identity_signals ("
@@ -121,6 +163,26 @@ def ensure_schema(conn, overwrite=False):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_identity_signals_attr_value_norm "
         "ON identity_signals(attribute, value_norm)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_person_observations_chunk "
+        "ON person_observations(file_id, chunk_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_person_observations_name_norm "
+        "ON person_observations(name_norm)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_person_clusters_name_norm "
+        "ON person_clusters(display_name_norm)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_person_clusters_dob "
+        "ON person_clusters(dob)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_person_cluster_members_obs "
+        "ON person_cluster_members(obs_id)"
     )
     conn.commit()
 
