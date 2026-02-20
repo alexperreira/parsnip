@@ -235,22 +235,21 @@ Redacted samples (optional debug):
 
 ## Implementation Checklist
 
-- [ ] Lock thread unit: confirm “segment = (file_id, chunk_id)” is the right default, or define a deterministic splitter for long chunks.
-- [ ] Specify and freeze normalization rules for `speaker_norm` (reuse Phase 8 canonicalization where possible).
-- [ ] Define and check in a fixed stopword list + tokenization rules (deterministic, versioned).
-- [ ] Finalize additive SQLite schema (tables + indexes) and bump `SCHEMA_VERSION`.
-- [ ] Implement Phase 10 module `src/conversation_threading/phase10_thread_conversations.py` with `build_*` helper and summary output.
-- [ ] Implement segment builder (participants, case grouping, anchor date derivation, feature hashing).
-- [ ] Implement bounded candidate generation with hard fanout caps (avoid O(n²)).
-- [ ] Implement scoring + decision thresholds with explainable reason codes.
-- [ ] Implement clustering (union-find) and thread materialization tables.
-- [ ] Implement deterministic topic labeling (`keywords_v1`) and store `label_method`.
+- [x] Lock thread unit: confirm “segment = (file_id, chunk_id)” is the right default, or define a deterministic splitter for long chunks.
+- [x] Specify and freeze normalization rules for `speaker_norm` (reuse Phase 8 canonicalization where possible).
+- [x] Define and check in a fixed stopword list + tokenization rules (deterministic, versioned).
+- [x] Finalize additive SQLite schema (tables + indexes) and bump `SCHEMA_VERSION`.
+- [x] Implement Phase 10 module `src/conversation_threading/phase10_thread_conversations.py` with `build_*` helper and summary output.
+- [x] Implement segment builder (participants, case grouping, anchor date derivation, feature hashing).
+- [x] Implement bounded candidate generation with hard fanout caps (avoid O(n²)).
+- [x] Implement scoring + decision thresholds with explainable reason codes.
+- [x] Implement clustering (union-find) and thread materialization tables.
+- [x] Implement deterministic topic labeling (`keywords_v1`) and store `label_method`.
 - [ ] (Optional) Implement LLM label refinement behind explicit flags; default must remain deterministic/offline.
-- [ ] Add CLI integration (`fileparse thread`) and wire into `fileparse run --steps …`.
-- [ ] Add Phase 7 validation checks for the new tables (row counts, foreign key shape, idempotency on reruns).
+- [x] Add CLI integration (`fileparse thread`) and wire into `fileparse run --steps …`.
+- [x] Add Phase 7 validation checks for the new tables (row counts, foreign key shape, idempotency on reruns).
 - [ ] Add tests:
   - [ ] unit tests for normalization/tokenization determinism
   - [ ] unit tests for candidate generation caps
   - [ ] unit tests for clustering determinism on a tiny synthetic DB
   - [ ] regression test: rerun threading twice => identical thread assignments
-
