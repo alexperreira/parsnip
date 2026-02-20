@@ -176,6 +176,10 @@ def _score_pair(left, right, signals):
         return score, reasons, "auto_merge"
     if addr_match and ("name_exact" in reasons or "nickname_match" in reasons) and score >= 9.0:
         return score, reasons, "auto_merge"
+    if case_match and not dob_match and not addr_match:
+        # Case IDs are useful linkage signals but not safe to auto-merge on.
+        reasons.append("case_id_only")
+        return score, reasons, "needs_review"
     if score >= 5.0:
         # Name-only or weak-signal matches should be reviewable, not auto merged.
         if not dob_match and not addr_match:
@@ -403,4 +407,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

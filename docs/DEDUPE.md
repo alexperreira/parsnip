@@ -241,12 +241,12 @@ Error handling:
 [x] Consider `fileparse run --steps …` support for `resolve` (off by default until stable).
 
 ### 5) Tests (Deterministic, No LLM Required)
-[ ] Add `tests/test_phase8_resolve_people.py` using a temp SQLite DB:
+[x] Add `tests/test_phase8_resolve_people.py` using a temp SQLite DB:
   - alias case: "Robert Smith" + "Bob Smith" with shared DOB => auto_merge
   - shared case ID only => needs_review
   - same name, conflicting DOB => no_merge
   - address+name match across files => auto_merge (if strong enough)
-[ ] Add loader tests for `identity_signals` similar to `tests/test_phase6_loaders.py`.
+[x] Add loader tests for `identity_signals` similar to `tests/test_phase6_loaders.py`.
 
 ### 6) Documentation
 [ ] Update `README.md` with resolver usage and tables created.
