@@ -250,6 +250,7 @@ Load one output type at a time:
 PYTHONPATH=src python -m loaders.load_entities --input output/entities.jsonl --db output/store.sqlite
 PYTHONPATH=src python -m loaders.load_events --input output/events.jsonl --db output/store.sqlite
 PYTHONPATH=src python -m loaders.load_conversations --input output/conversations.jsonl --db output/store.sqlite
+PYTHONPATH=src python -m loaders.load_identity_signals --input output/identity_signals.jsonl --db output/store.sqlite
 ```
 
 Load all three through the CLI:
@@ -275,6 +276,7 @@ sqlite3 output/store.sqlite "SELECT COUNT(*) FROM entities;"
 sqlite3 output/store.sqlite "SELECT COUNT(*) FROM events;"
 sqlite3 output/store.sqlite "SELECT COUNT(*) FROM conversations;"
 sqlite3 output/store.sqlite "SELECT COUNT(*) FROM mentions;"
+sqlite3 output/store.sqlite "SELECT COUNT(*) FROM identity_signals;"
 ```
 
 ### Loader troubleshooting
@@ -314,3 +316,27 @@ You can still override steps explicitly:
 ```bash
 PYTHONPATH=src python -m file_parser.cli run --input /path/to/input --steps extract-text,chunk,llm,load
 ```
+
+## Phase 8: People entity resolution (dedupe)
+
+Phase 8 resolves person observations into canonical people and persists the results into the same SQLite DB.
+
+Prereqs:
+- Entities loaded into `output/store.sqlite`.
+- (Optional but recommended) Identity signals loaded into `output/store.sqlite`.
+
+Run resolution (recommended: reset resolver tables each time you rebuild):
+
+```bash
+PYTHONPATH=src python -m file_parser.cli resolve -- --db output/store.sqlite --reset
+```
+
+Resolver tables created:
+- `person_observations`
+- `person_clusters`
+- `person_cluster_members`
+- `person_resolution_edges`
+
+Operator note (conservative by default):
+- Case IDs are treated as linkage signals but are not safe to auto-merge on; they surface as `needs_review`.
+- Auto-merges require a strong signal (for example matching DOB, or address match reinforced by name match).

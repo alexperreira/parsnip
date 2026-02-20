@@ -249,8 +249,8 @@ Error handling:
 [x] Add loader tests for `identity_signals` similar to `tests/test_phase6_loaders.py`.
 
 ### 6) Documentation
-[ ] Update `README.md` with resolver usage and tables created.
-[ ] Add operator note about conservative thresholds and review workflow.
+[x] Update `README.md` with resolver usage and tables created.
+[x] Add operator note about conservative thresholds and review workflow.
 
 ## Acceptance Criteria
 
