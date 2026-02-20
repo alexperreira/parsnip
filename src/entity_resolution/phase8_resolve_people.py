@@ -193,6 +193,12 @@ def build_resolve_people(db_path, person_types, reset=False, max_group_size=200)
     conn = connect_db(db_path)
     ensure_schema(conn, overwrite=False)
 
+    config = {
+        "person_types": person_types,
+        "reset": bool(reset),
+        "max_group_size": int(max_group_size),
+    }
+
     if reset:
         conn.execute("DELETE FROM person_resolution_edges")
         conn.execute("DELETE FROM person_cluster_members")
@@ -357,7 +363,7 @@ def build_resolve_people(db_path, person_types, reset=False, max_group_size=200)
     conn.close()
 
     elapsed = round(time.monotonic() - started, 3)
-    return {
+    summary = {
         "observations_total": len(observations),
         "observations_attempted": obs_rows_attempted,
         "observations_inserted": obs_rows_inserted,
@@ -372,6 +378,35 @@ def build_resolve_people(db_path, person_types, reset=False, max_group_size=200)
         "members_inserted": member_rows_inserted,
         "elapsed_seconds": elapsed,
     }
+
+    # Persist a compact run record for later debugging without scraping stdout.
+    conn = connect_db(db_path)
+    ensure_schema(conn, overwrite=False)
+    conn.execute(
+        "INSERT INTO meta(key, value) VALUES (?, datetime('now')) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        ("resolver.people.last_run_utc",),
+    )
+    conn.execute(
+        "INSERT INTO meta(key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (
+            "resolver.people.config_json",
+            json.dumps(config, ensure_ascii=True, separators=(",", ":")),
+        ),
+    )
+    conn.execute(
+        "INSERT INTO meta(key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (
+            "resolver.people.summary_json",
+            json.dumps(summary, ensure_ascii=True, separators=(",", ":")),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    return summary
 
 
 def main():

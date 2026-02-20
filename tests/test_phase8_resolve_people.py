@@ -320,6 +320,36 @@ class Phase8ResolvePeopleTest(unittest.TestCase):
             self.assertEqual(self._edge_decision(conn, jane_id, jane_id_2), "auto_merge")
             conn.close()
 
+    def test_resolver_persists_meta_summary(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            entities_path = root / "entities.jsonl"
+            db_path = root / "store.sqlite"
+
+            self._write_jsonl(
+                entities_path,
+                [
+                    {
+                        "file_id": "file_a",
+                        "chunk_id": "chunk_1",
+                        "page_range": [1, 1],
+                        "items": [{"entity": "Alice Jones", "type": "person", "confidence": 0.9}],
+                    }
+                ],
+            )
+            build_load_entities(entities_path, db_path, overwrite=True)
+
+            build_resolve_people(db_path, person_types="person", reset=True)
+            conn = sqlite3.connect(db_path)
+            keys = {
+                row[0]
+                for row in conn.execute("SELECT key FROM meta WHERE key LIKE 'resolver.people.%'").fetchall()
+            }
+            self.assertIn("resolver.people.last_run_utc", keys)
+            self.assertIn("resolver.people.config_json", keys)
+            self.assertIn("resolver.people.summary_json", keys)
+            conn.close()
+
     def test_identity_signals_loader_normalization(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -374,4 +404,3 @@ class Phase8ResolvePeopleTest(unittest.TestCase):
             self.assertIn(("dob", "1980-01-02"), norms)
             self.assertIn(("address", "123 main st"), norms)
             conn.close()
-
