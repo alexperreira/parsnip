@@ -19,7 +19,9 @@ from loaders.load_conversations import main as load_conversations_main
 from loaders.load_entities import main as load_entities_main
 from loaders.load_events import main as load_events_main
 from loaders.load_identity_signals import main as load_identity_signals_main
+from loaders.load_manifest import main as load_manifest_main
 from text_extraction.phase3_extract_text import main as phase3_main
+from timeline.phase9_stitch_timeline import main as timeline_main
 
 app = typer.Typer(
     add_completion=False,
@@ -145,6 +147,11 @@ def load_identity_signals(ctx: typer.Context):
     _dispatch_to_main("load identity-signals", list(ctx.args), load_identity_signals_main)
 
 
+@load_app.command("manifest", help="Load Phase 0 manifest JSONL into SQLite.")
+def load_manifest(ctx: typer.Context):
+    _dispatch_to_main("load manifest", list(ctx.args), load_manifest_main)
+
+
 @load_app.command("all", help="Load entities, events, and conversations into SQLite.")
 def load_all(
     entities_input: str = typer.Option(
@@ -197,6 +204,11 @@ def resolve(ctx: typer.Context):
     _dispatch_to_main("resolve", list(ctx.args), resolve_people_main)
 
 
+@app.command("timeline", help="Normalize event dates and stitch timelines (Phase 9).")
+def timeline(ctx: typer.Context):
+    _dispatch_to_main("timeline", list(ctx.args), timeline_main)
+
+
 @app.command("run", help="Run extract-text, chunk, llm, load, and validate steps.")
 def run(
     ctx: typer.Context,
@@ -205,7 +217,7 @@ def run(
     steps: str = typer.Option(
         "extract-text,chunk,llm,load,validate",
         "--steps",
-        help="Comma-separated steps: extract-text,chunk,llm,load,resolve,validate.",
+        help="Comma-separated steps: extract-text,chunk,llm,load,resolve,timeline,validate.",
     ),
     no_interactive: bool = typer.Option(
         False,
@@ -279,6 +291,14 @@ def run(
             ["--db", str(db_path), "--reset"],
             resolve_people_main,
         )
+    if "timeline" in selected:
+        timeline_args = ["--db", str(db_path)]
+        if chunks_path.exists():
+            timeline_args.extend(["--chunks", str(chunks_path)])
+        manifest_path = output_path / "manifest.jsonl"
+        if manifest_path.exists():
+            timeline_args.extend(["--manifest", str(manifest_path)])
+        _dispatch_to_main("timeline", timeline_args, timeline_main)
     if "validate" in selected:
         _dispatch_to_main(
             "validate",

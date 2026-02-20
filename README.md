@@ -247,6 +247,7 @@ Document-level `quality_score` is the mean of `quality_score_page` across the do
 Load one output type at a time:
 
 ```bash
+PYTHONPATH=src python -m loaders.load_manifest --input output/manifest.jsonl --db output/store.sqlite
 PYTHONPATH=src python -m loaders.load_entities --input output/entities.jsonl --db output/store.sqlite
 PYTHONPATH=src python -m loaders.load_events --input output/events.jsonl --db output/store.sqlite
 PYTHONPATH=src python -m loaders.load_conversations --input output/conversations.jsonl --db output/store.sqlite
@@ -267,6 +268,12 @@ Reset and rebuild store tables before loading:
 
 ```bash
 PYTHONPATH=src python -m file_parser.cli load all --overwrite
+```
+
+Load manifest through the CLI:
+
+```bash
+PYTHONPATH=src python -m file_parser.cli load manifest -- --input output/manifest.jsonl --db output/store.sqlite
 ```
 
 Inspect the database quickly:
@@ -340,3 +347,33 @@ Resolver tables created:
 Operator note (conservative by default):
 - Case IDs are treated as linkage signals but are not safe to auto-merge on; they surface as `needs_review`.
 - Auto-merges require a strong signal (for example matching DOB, or address match reinforced by name match).
+
+## Phase 9: Timeline stitching
+
+Phase 9 normalizes `events.date` strings into sortable date ranges and links events to cases.
+
+Prereqs:
+- Events loaded into `output/store.sqlite`.
+- (Optional but recommended) Identity signals loaded for `case_id` grouping.
+- (Optional) `output/text/chunks.jsonl` to derive chunk-level anchors for relative dates.
+- (Optional) `output/manifest.jsonl` to provide file-level anchors via `mtime`.
+
+Run timeline stitching (recommended: use `--reset` when rebuilding):
+
+```bash
+PYTHONPATH=src python -m file_parser.cli timeline -- \
+  --db output/store.sqlite \
+  --chunks output/text/chunks.jsonl \
+  --manifest output/manifest.jsonl \
+  --reset
+```
+
+Tables created:
+- `event_times`
+- `event_cases`
+
+`fileparse run` can include `timeline` as a step:
+
+```bash
+PYTHONPATH=src python -m file_parser.cli run --input /path/to/input --steps extract-text,chunk,llm,load,timeline,validate
+```

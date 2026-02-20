@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "4"
 
 
 def connect_db(db_path):
@@ -15,6 +15,9 @@ def connect_db(db_path):
 def ensure_schema(conn, overwrite=False):
     if overwrite:
         for table in (
+            "event_cases",
+            "event_times",
+            "files",
             "person_resolution_edges",
             "person_cluster_members",
             "person_clusters",
@@ -29,6 +32,17 @@ def ensure_schema(conn, overwrite=False):
             conn.execute(f"DROP TABLE IF EXISTS {table}")
 
     conn.execute(
+        "CREATE TABLE IF NOT EXISTS files ("
+        "file_id TEXT PRIMARY KEY,"
+        "source_type TEXT,"
+        "container_path TEXT,"
+        "virtual_path TEXT,"
+        "mtime_utc TEXT,"
+        "size_bytes INTEGER"
+        ")"
+    )
+
+    conn.execute(
         "CREATE TABLE IF NOT EXISTS person_observations ("
         "obs_id INTEGER PRIMARY KEY,"
         "name TEXT NOT NULL,"
@@ -38,6 +52,28 @@ def ensure_schema(conn, overwrite=False):
         "page_start INTEGER,"
         "page_end INTEGER,"
         "UNIQUE(name_norm, file_id, chunk_id, page_start, page_end)"
+        ")"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS event_times ("
+        "event_id INTEGER PRIMARY KEY,"
+        "date_raw TEXT,"
+        "date_start TEXT,"
+        "date_end TEXT,"
+        "precision TEXT,"
+        "status TEXT NOT NULL,"
+        "parser TEXT,"
+        "anchor_date TEXT,"
+        "notes_json TEXT"
+        ")"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS event_cases ("
+        "event_id INTEGER NOT NULL,"
+        "case_id TEXT NOT NULL,"
+        "case_id_norm TEXT NOT NULL,"
+        "source TEXT NOT NULL,"
+        "PRIMARY KEY(event_id, case_id_norm, source)"
         ")"
     )
     conn.execute(
@@ -184,6 +220,9 @@ def ensure_schema(conn, overwrite=False):
         "CREATE INDEX IF NOT EXISTS idx_person_cluster_members_obs "
         "ON person_cluster_members(obs_id)"
     )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_files_mtime ON files(mtime_utc)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_event_times_start ON event_times(date_start)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_event_cases_case ON event_cases(case_id_norm)")
     conn.commit()
 
 

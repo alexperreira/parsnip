@@ -242,25 +242,24 @@ Include at most K redacted samples:
 
 ## Testing Plan
 
-Add unit tests (pure functions) for:
+- [x] Add unit tests (pure functions) for:
 
-- absolute parsing (each supported format; ranges; ambiguity)
-- relative parsing/resolution (fixed anchor dates; all weekdays; boundary behavior)
-- case-id normalization
+  - [x] absolute parsing (each supported format; ranges; ambiguity)
+  - [x] relative parsing/resolution (fixed anchor dates; all weekdays; boundary behavior)
+  - [x] case-id normalization
 
-Add integration tests using a temporary SQLite DB:
-- insert a few `events` rows + `identity_signals` + optional `files` rows
-- run the stitcher
-- assert `event_times` and `event_cases` contents are stable and correct
+- [x] Add integration tests using a temporary SQLite DB:
+  - [x] insert a few `events` rows + `identity_signals` + optional `files` rows
+  - [x] run the stitcher
+  - [x] assert `event_times` and `event_cases` contents are stable and correct
 
 ## Codex-Ready TODO Checklist (When Implementing)
 
-1) Add schema v4 tables in `src/loaders/store.py` (additive).
-2) Add a `manifest` loader (optional) to populate `files`.
-3) Implement a strict date parser module (stdlib-only) with exhaustive tests.
-4) Implement the stitcher (`phase9_stitch_timeline`) that:
-   - reads `events` (and optionally chunk text/manifest for anchors),
-   - writes `event_times` + `event_cases`,
-   - prints redacted summaries.
-5) Add CLI wiring (`src/file_parser/cli.py`) and documentation updates in `README.md`.
-
+- [x] Add schema v4 tables in `src/loaders/store.py` (additive).
+- [x] Add a `manifest` loader (optional) to populate `files`.
+- [x] Implement a strict date parser module (stdlib-only) with exhaustive tests.
+- [x] Implement the stitcher (`phase9_stitch_timeline`) that:
+  - [x] reads `events` (and optionally chunk text/manifest for anchors),
+  - [x] writes `event_times` + `event_cases`,
+  - [x] prints redacted summaries.
+- [x] Add CLI wiring (`src/file_parser/cli.py`) and documentation updates in `README.md`.
