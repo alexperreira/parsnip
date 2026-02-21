@@ -189,13 +189,14 @@ Work items:
 - [x] Write an ingestion tool that loads the Phase C exports into the graph DB deterministically.
 - [x] Implement a minimal query layer that answers the must-answer queries, with edge-level evidence links
   back to SQLite rows (or exported evidence IDs).
-- [ ] Add parity checks:
-  - [ ] for a sample of cases/people, compare query results between SQLite joins and graph traversal.
+- [x] Add parity checks:
+  - [x] for a sample of cases/people, compare query results between SQLite joins and graph traversal.
 
 Phase D entry point (Cypher generator + query templates):
 
 - Generate Neo4j Cypher import: `PYTHONPATH=src python -m knowledge_graph.phase12_graphdb_mirror --kg-dir output/kg --out output/kg/neo4j_import.cypher`
 - Print query template: `PYTHONPATH=src python -m knowledge_graph.phase12_graphdb_mirror --print-query case_overview`
+- Run parity checks (SQLite joins vs exported graph traversal): `PYTHONPATH=src python -m knowledge_graph.phase12_parity_checks --db output/store.sqlite --kg-dir output/kg`
 
 ### Phase E — Cutover strategy (optional, later)
 
