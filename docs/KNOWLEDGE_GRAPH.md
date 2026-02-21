@@ -202,10 +202,18 @@ Phase D entry point (Cypher generator + query templates):
 
 If/when the graph DB becomes the preferred traversal backend:
 
-- [ ] Keep write-path in SQLite; publish-to-graph as a build step (eventually streaming if justified).
-- [ ] Treat the graph DB as a cache: rebuildable from SQLite + extraction outputs.
-- [ ] Define operational requirements:
-  - [ ] backups, migrations, auth, resource sizing, and failure modes.
+- [x] Keep write-path in SQLite; publish-to-graph as a build step (eventually streaming if justified).
+- [x] Treat the graph DB as a cache: rebuildable from SQLite + extraction outputs.
+- [x] Define operational requirements (v0):
+  - [x] Backups: SQLite is authoritative; Neo4j is rebuildable. Back up Neo4j only for convenience/restore speed.
+  - [x] Migrations: all schema changes versioned; mirror is rebuilt from exports; no graph-only procedures required.
+  - [x] Auth: Neo4j credentials stored out-of-repo; read-only service user for query workloads where possible.
+  - [x] Resource sizing: size by edge/evidence volumes + traversal fanout; validate with measured `edges_per_case` p99.
+  - [x] Failure modes: if mirror is unavailable, fall back to SQLite joins and/or exports; mirror rebuild is deterministic.
+
+Phase E entry point (one-shot publish artifacts):
+
+- `PYTHONPATH=src python -m knowledge_graph.phase13_publish_graph --db output/store.sqlite --out output/kg`
 
 ## Risks and mitigations
 
