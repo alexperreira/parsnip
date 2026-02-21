@@ -217,10 +217,16 @@ Phase E entry point (one-shot publish artifacts):
 
 ## Risks and mitigations
 
-- [ ] **Schema churn** (L3–L5 still evolving): keep Stage 1 as additive edge tables; export format versioned.
-- [ ] **Edge explosion** (too many co-occurrence edges): require case scoping + confidence thresholds + caps.
-- [ ] **Non-determinism** (parallel builds): enforce stable ordering + uniqueness keys; record build metadata.
-- [ ] **Data leakage** (quotes/paths): store evidence pointers, but redact/truncate in logs and summaries.
+- [x] **Schema churn** (L3–L5 still evolving): keep Stage 1 as additive edge tables; export format versioned.
+  - Stage 1 is additive (`cases`, `kg_edges`, `kg_edge_evidence`) and rebuildable from upstream tables.
+  - Exports are deterministic and validated; `phase13_publish_graph` records build metadata in a manifest.
+- [x] **Edge explosion** (too many co-occurrence edges): require case scoping + confidence thresholds + caps.
+  - Deterministic caps are available for the highest-risk edge type (`MENTIONED_IN_EVENT`) via:
+    - `phase11_materialize_edges --max-people-per-chunk N --max-events-per-chunk N`
+- [x] **Non-determinism** (parallel builds): enforce stable ordering + uniqueness keys; record build metadata.
+  - All logical keys are unique; exports are ordered by stable keys; publish writes `build_manifest.json`.
+- [x] **Data leakage** (quotes/paths): store evidence pointers, but redact/truncate in logs and summaries.
+  - CLIs print counts/top-k summaries only; `phase12_parity_checks` redacts case/person keys in diff samples.
 
 ## Open questions (to resolve before Phase D)
 

@@ -137,7 +137,14 @@ def _upsert_cases(conn):
     return inserted, updated
 
 
-def build_materialize_edges(db_path, reset=False, extractor_version="kg_phase11_v1"):
+def build_materialize_edges(
+    db_path,
+    reset=False,
+    extractor_version="kg_phase11_v1",
+    *,
+    max_people_per_chunk=None,
+    max_events_per_chunk=None,
+):
     started = time.monotonic()
     conn = connect_db(db_path)
     ensure_schema(conn, overwrite=False)
@@ -159,6 +166,7 @@ def build_materialize_edges(db_path, reset=False, extractor_version="kg_phase11_
         "event_case_rows": 0,
         "person_event_rows": 0,
         "person_case_rows": 0,
+        "person_event_chunks_skipped_high_fanout": 0,
     }
 
     def insert_edge(edge: _Edge):
@@ -230,6 +238,69 @@ def build_materialize_edges(db_path, reset=False, extractor_version="kg_phase11_
         summary["event_case_rows"] += 1
 
     # Edge: Person -[:MENTIONED_IN_EVENT]-> Event (co-occurrence in the same file/chunk).
+    #
+    # Risk mitigation: edge explosion is possible for large/high-fanout chunks. When caps are provided,
+    # apply deterministic chunk-level filters inside SQLite so we avoid generating a huge cross-product.
+    max_people = None if max_people_per_chunk is None else int(max_people_per_chunk)
+    max_events = None if max_events_per_chunk is None else int(max_events_per_chunk)
+
+    people_counts_cte = (
+        "people_counts AS ("
+        "SELECT po.file_id AS file_id, po.chunk_id AS chunk_id, "
+        "COUNT(DISTINCT pcm.person_id) AS people_count "
+        "FROM person_cluster_members pcm "
+        "JOIN person_observations po ON po.obs_id = pcm.obs_id "
+        "GROUP BY po.file_id, po.chunk_id"
+        ")"
+    )
+    event_counts_cte = (
+        "event_counts AS ("
+        "SELECT file_id AS file_id, chunk_id AS chunk_id, "
+        "COUNT(DISTINCT event_id) AS event_count "
+        "FROM events "
+        "GROUP BY file_id, chunk_id"
+        ")"
+    )
+    people_filter_join = ""
+    event_filter_join = ""
+    where_clauses = []
+    params = []
+    if max_people is not None:
+        people_filter_join = (
+            "JOIN people_counts pc ON pc.file_id = po.file_id AND pc.chunk_id = po.chunk_id "
+        )
+        where_clauses.append("pc.people_count <= ?")
+        params.append(max_people)
+    if max_events is not None:
+        event_filter_join = (
+            "JOIN event_counts ec ON ec.file_id = e.file_id AND ec.chunk_id = e.chunk_id "
+        )
+        where_clauses.append("ec.event_count <= ?")
+        params.append(max_events)
+
+    with_clause = ""
+    if max_people is not None or max_events is not None:
+        with_clause = f"WITH {people_counts_cte}, {event_counts_cte} "
+
+    where_sql = ""
+    if where_clauses:
+        where_sql = "WHERE " + " AND ".join(where_clauses) + " "
+
+    person_event_sql = (
+        with_clause
+        + "SELECT DISTINCT pcm.person_id, e.event_id, "
+        "e.file_id, e.chunk_id, "
+        "po.page_start, po.page_end, "
+        "e.page_start, e.page_end, "
+        "e.confidence "
+        "FROM person_cluster_members pcm "
+        "JOIN person_observations po ON po.obs_id = pcm.obs_id "
+        "JOIN events e ON e.file_id = po.file_id AND e.chunk_id = po.chunk_id "
+        + people_filter_join
+        + event_filter_join
+        + where_sql
+    )
+
     for (
         person_id,
         event_id,
@@ -240,16 +311,7 @@ def build_materialize_edges(db_path, reset=False, extractor_version="kg_phase11_
         ev_page_start,
         ev_page_end,
         ev_conf,
-    ) in conn.execute(
-        "SELECT DISTINCT pcm.person_id, e.event_id, "
-        "e.file_id, e.chunk_id, "
-        "po.page_start, po.page_end, "
-        "e.page_start, e.page_end, "
-        "e.confidence "
-        "FROM person_cluster_members pcm "
-        "JOIN person_observations po ON po.obs_id = pcm.obs_id "
-        "JOIN events e ON e.file_id = po.file_id AND e.chunk_id = po.chunk_id"
-    ):
+    ) in conn.execute(person_event_sql, tuple(params)):
         if person_id is None or event_id is None:
             continue
         if not isinstance(file_id, str) or not isinstance(chunk_id, str) or not chunk_id:
@@ -267,6 +329,31 @@ def build_materialize_edges(db_path, reset=False, extractor_version="kg_phase11_
             "phase11_cooccurrence:file_chunk",
         )
         summary["person_event_rows"] += 1
+
+    if max_people is not None or max_events is not None:
+        skipped_where = []
+        skipped_params = []
+        if max_people is not None:
+            skipped_where.append("pc.people_count > ?")
+            skipped_params.append(max_people)
+        if max_events is not None:
+            skipped_where.append("ec.event_count > ?")
+            skipped_params.append(max_events)
+        skipped_sql = (
+            f"WITH {people_counts_cte}, {event_counts_cte} "
+            "SELECT COUNT(*) "
+            "FROM ("
+            "SELECT DISTINCT e.file_id, e.chunk_id "
+            "FROM events e "
+            "JOIN event_counts ec ON ec.file_id = e.file_id AND ec.chunk_id = e.chunk_id "
+            "JOIN people_counts pc ON pc.file_id = e.file_id AND pc.chunk_id = e.chunk_id "
+            "WHERE "
+            + " OR ".join(skipped_where)
+            + ")"
+        )
+        summary["person_event_chunks_skipped_high_fanout"] = int(
+            conn.execute(skipped_sql, tuple(skipped_params)).fetchone()[0]
+        )
 
     # Edge: Person -[:IN_CASE]-> Case (identity_signals case_id attached to a resolved person).
     for (
@@ -324,18 +411,38 @@ def _parse_args():
         action="store_true",
         help="Clear existing cases/kg_edges/kg_edge_evidence before rebuilding.",
     )
+    parser.add_argument(
+        "--max-people-per-chunk",
+        type=int,
+        default=None,
+        help="Optional cap to skip MENTIONED_IN_EVENT co-occurrence edges for chunks with >N distinct people "
+        "(default: no cap).",
+    )
+    parser.add_argument(
+        "--max-events-per-chunk",
+        type=int,
+        default=None,
+        help="Optional cap to skip MENTIONED_IN_EVENT co-occurrence edges for chunks with >N distinct events "
+        "(default: no cap).",
+    )
     return parser.parse_args()
 
 
 def main():
     args = _parse_args()
-    summary = build_materialize_edges(args.db, reset=args.reset)
+    summary = build_materialize_edges(
+        args.db,
+        reset=args.reset,
+        max_people_per_chunk=args.max_people_per_chunk,
+        max_events_per_chunk=args.max_events_per_chunk,
+    )
     print("Knowledge graph materialization summary")
     for key in (
         "cases_inserted_or_updated",
         "event_case_rows",
         "person_event_rows",
         "person_case_rows",
+        "person_event_chunks_skipped_high_fanout",
         "edges_inserted",
         "evidence_inserted",
         "elapsed_seconds",
@@ -345,4 +452,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

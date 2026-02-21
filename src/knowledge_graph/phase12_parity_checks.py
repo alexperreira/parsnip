@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import time
 from dataclasses import dataclass
@@ -15,6 +16,13 @@ class _Diff:
     key: str
     only_in_sql: int
     only_in_graph: int
+
+
+def _redact_key(value: str) -> str:
+    if not isinstance(value, str) or not value:
+        return "hash:empty"
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+    return f"hash:{digest}"
 
 
 def _iter_jsonl(path: Path):
@@ -135,7 +143,15 @@ def build_parity_checks(
             return
         counts["diffs"] += 1
         if len(diffs) < max_diffs:
-            diffs.append(_Diff(kind=kind, key=key, only_in_sql=len(only_sql), only_in_graph=len(only_graph)))
+            safe_key = key if kind == "count" else _redact_key(key)
+            diffs.append(
+                _Diff(
+                    kind=kind,
+                    key=safe_key,
+                    only_in_sql=len(only_sql),
+                    only_in_graph=len(only_graph),
+                )
+            )
 
     if counts["sql_edges"] != counts["export_edges"]:
         record_diff(
@@ -310,4 +326,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
