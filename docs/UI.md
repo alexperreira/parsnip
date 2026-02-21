@@ -132,7 +132,7 @@ UI v1 reads from existing tables only; no UI-owned derived persistence.
 - [x] Draft API contract for read models required by each screen (including pagination, sorting, filtering params).
 - [x] Define observability schema for UI telemetry and redacted error reporting.
 - [x] Create accessibility checklist (keyboard flow, focus order, contrast, screen-reader labels).
-- [ ] Write acceptance criteria per screen with deterministic expected behavior.
+- [x] Write acceptance criteria per screen with deterministic expected behavior.
 
 ## Sequential Workstream (must be completed in order)
 
