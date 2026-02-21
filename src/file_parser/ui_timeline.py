@@ -3,7 +3,7 @@ from typing import Optional
 
 from loaders.store import connect_db
 
-from file_parser.ui_shell import WidgetState, build_widget_error
+from file_parser.ui_shell import SharedFilterState, WidgetState, build_widget_error, resolve_case_filter
 
 
 @dataclass(frozen=True)
@@ -77,8 +77,13 @@ def _load_rows(conn, case_id_norm: str, limit: int) -> list[tuple]:
     ).fetchall()
 
 
-def build_case_timeline(db_path: str, case_id_norm: str, limit: int = 500) -> TimelineResult:
-    case_key = (case_id_norm or "").strip()
+def build_case_timeline(
+    db_path: str,
+    case_id_norm: str,
+    limit: int = 500,
+    shared_filters: Optional[SharedFilterState] = None,
+) -> TimelineResult:
+    case_key = (resolve_case_filter(case_id_norm, shared_filters) or "").strip()
     if not case_key:
         return TimelineResult(
             status=404,
@@ -157,19 +162,37 @@ def build_case_timeline(db_path: str, case_id_norm: str, limit: int = 500) -> Ti
             ) in raw_rows
         ]
 
+        confidence_min = shared_filters.confidence_min if shared_filters else None
+        date_start = shared_filters.date_start if shared_filters else None
+        date_end = shared_filters.date_end if shared_filters else None
+
+        def include_row(row: TimelineEventRow) -> bool:
+            if confidence_min is not None:
+                if row.confidence is None or row.confidence < float(confidence_min):
+                    return False
+            if isinstance(date_start, str) and date_start.strip():
+                if not row.date_start or row.date_start < date_start.strip():
+                    return False
+            if isinstance(date_end, str) and date_end.strip():
+                if not row.date_start or row.date_start > date_end.strip():
+                    return False
+            return True
+
+        filtered_rows = [row for row in rows if include_row(row)]
+
         normalized_rows = sorted(
-            (row for row in rows if row.status == "ok" and row.date_start),
+            (row for row in filtered_rows if row.status == "ok" and row.date_start),
             key=lambda row: (row.date_start, row.event_id),
         )
         unresolved_rows = sorted(
-            (row for row in rows if not (row.status == "ok" and row.date_start)),
+            (row for row in filtered_rows if not (row.status == "ok" and row.date_start)),
             key=lambda row: (row.status, row.date_raw or "", row.event_id),
         )
 
         widget_states = [
             WidgetState(widget_id="normalized_lane", status="ready" if normalized_rows else "empty"),
             WidgetState(widget_id="unresolved_lane", status="ready" if unresolved_rows else "empty"),
-            WidgetState(widget_id="source_drilldown", status="ready" if rows else "empty"),
+            WidgetState(widget_id="source_drilldown", status="ready" if filtered_rows else "empty"),
         ]
 
         return TimelineResult(

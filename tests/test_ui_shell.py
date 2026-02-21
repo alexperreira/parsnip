@@ -1,11 +1,15 @@
 import unittest
 
 from file_parser.ui_shell import (
+    SharedFilterState,
     WidgetState,
     build_primary_navigation,
+    build_primary_navigation_with_filters,
     build_widget_error,
     enforce_route_guard,
+    parse_shared_filters,
     resolve_route,
+    serialize_shared_filters,
     summarize_shell_health,
 )
 
@@ -48,6 +52,32 @@ class TestUiShell(unittest.TestCase):
         self.assertEqual(nav[1].path, "/cases/case-123/people")
         self.assertEqual(nav[2].path, "/cases/case-123/timeline")
         self.assertEqual(nav[3].path, "/cases/case-123/evidence")
+
+    def test_shared_filters_round_trip(self):
+        parsed = parse_shared_filters(
+            "/cases/case-123/timeline?case_id_norm=case-123&person_id=7&date_start=2026-01-01&date_end=2026-02-01&confidence_min=0.7"
+        )
+        self.assertEqual(parsed.case_id_norm, "case-123")
+        self.assertEqual(parsed.person_id, 7)
+        self.assertEqual(parsed.date_start, "2026-01-01")
+        self.assertEqual(parsed.date_end, "2026-02-01")
+        self.assertEqual(parsed.confidence_min, 0.7)
+
+        query = serialize_shared_filters(parsed)
+        self.assertEqual(
+            query,
+            "case_id_norm=case-123&person_id=7&date_start=2026-01-01&date_end=2026-02-01&confidence_min=0.7",
+        )
+
+    def test_primary_navigation_persists_shared_filters(self):
+        nav = build_primary_navigation_with_filters(
+            "case-123",
+            SharedFilterState(person_id=7, date_start="2026-01-01", date_end="2026-02-01", confidence_min=0.6),
+        )
+        self.assertEqual(
+            nav[2].path,
+            "/cases/case-123/timeline?case_id_norm=case-123&person_id=7&date_start=2026-01-01&date_end=2026-02-01&confidence_min=0.6",
+        )
 
     def test_widget_error_and_shell_health(self):
         states = [

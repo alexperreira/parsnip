@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from file_parser.ui_timeline import build_case_timeline
+from file_parser.ui_shell import SharedFilterState
 from loaders.store import connect_db, ensure_schema
 
 
@@ -62,6 +63,18 @@ class TestUiTimeline(unittest.TestCase):
             self.assertEqual([row.event_id for row in result.unresolved_rows], [3])
             self.assertEqual(result.unresolved_rows[0].status, "unresolved_relative")
             self.assertEqual(result.unresolved_rows[0].provenance.source_table, "events")
+
+            filtered = build_case_timeline(
+                str(db_path),
+                "ignored-case-id",
+                shared_filters=SharedFilterState(
+                    case_id_norm="case-1",
+                    date_start="2026-01-02",
+                    confidence_min=0.75,
+                ),
+            )
+            self.assertEqual([row.event_id for row in filtered.normalized_rows], [1])
+            self.assertEqual(len(filtered.unresolved_rows), 0)
 
     def test_build_case_timeline_not_found(self):
         with tempfile.TemporaryDirectory() as tmpdir:

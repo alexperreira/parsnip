@@ -3,7 +3,7 @@ from typing import Optional
 
 from loaders.store import connect_db
 
-from file_parser.ui_shell import WidgetState, build_widget_error
+from file_parser.ui_shell import SharedFilterState, WidgetState, build_widget_error, resolve_case_filter
 
 
 @dataclass(frozen=True)
@@ -121,8 +121,9 @@ def build_evidence_browser(
     sort_by: str = "page_start",
     sort_dir: str = "asc",
     filters: Optional[EvidenceFilter] = None,
+    shared_filters: Optional[SharedFilterState] = None,
 ) -> EvidenceResult:
-    case_key = (case_id_norm or "").strip()
+    case_key = (resolve_case_filter(case_id_norm, shared_filters) or "").strip()
     if not case_key:
         return EvidenceResult(
             status=404,
@@ -157,6 +158,14 @@ def build_evidence_browser(
             )
 
         f = filters or EvidenceFilter()
+        f = EvidenceFilter(
+            source_table=f.source_table,
+            confidence_min=f.confidence_min if f.confidence_min is not None else (shared_filters.confidence_min if shared_filters else None),
+            confidence_max=f.confidence_max,
+            date_start=f.date_start if f.date_start is not None else (shared_filters.date_start if shared_filters else None),
+            date_end=f.date_end if f.date_end is not None else (shared_filters.date_end if shared_filters else None),
+            query=f.query,
+        )
         page_n = _normalize_page(page)
         page_size_n = _normalize_page_size(page_size)
         sort_by_n, sort_dir_n = _normalize_sort(sort_by, sort_dir)

@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from file_parser.ui_profile import build_person_profile
+from file_parser.ui_shell import SharedFilterState
 from loaders.store import connect_db, ensure_schema
 
 
@@ -110,6 +111,23 @@ class TestUiProfile(unittest.TestCase):
             self.assertEqual(states["identity"], "ready")
             self.assertEqual(states["linked_events"], "ready")
             self.assertEqual(states["linked_evidence"], "ready")
+
+            filtered = build_person_profile(
+                str(db_path),
+                "ignored-case-id",
+                999,
+                event_limit=10,
+                evidence_limit=20,
+                shared_filters=SharedFilterState(
+                    case_id_norm="case-1",
+                    person_id=1,
+                    date_start="2026-01-02",
+                    confidence_min=0.75,
+                ),
+            )
+            self.assertEqual(filtered.status, 200)
+            self.assertEqual(filtered.person_id, 1)
+            self.assertEqual(len(filtered.linked_events), 0)
 
     def test_build_person_profile_not_found(self):
         with tempfile.TemporaryDirectory() as tmpdir:

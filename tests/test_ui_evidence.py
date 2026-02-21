@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from file_parser.ui_evidence import EvidenceFilter, build_evidence_browser
+from file_parser.ui_shell import SharedFilterState
 from loaders.store import connect_db, ensure_schema
 
 
@@ -81,6 +82,26 @@ class TestUiEvidence(unittest.TestCase):
             self.assertEqual(item.source_table, "entities")
             self.assertEqual(item.chunk_id, "c1")
             self.assertGreaterEqual(item.confidence, 0.5)
+
+            shared_only = build_evidence_browser(
+                str(db_path),
+                "ignored-case-id",
+                page=1,
+                page_size=10,
+                sort_by="confidence",
+                sort_dir="desc",
+                shared_filters=SharedFilterState(
+                    case_id_norm="case-1",
+                    date_start="2026-01-03",
+                    confidence_min=0.3,
+                ),
+            )
+            self.assertEqual(shared_only.status, 200)
+            self.assertIsNotNone(shared_only.evidence_page)
+            self.assertTrue(all(item.confidence is None or item.confidence >= 0.3 for item in shared_only.evidence_page.items))
+            self.assertTrue(
+                all(isinstance(item.date_start, str) and item.date_start >= "2026-01-03" for item in shared_only.evidence_page.items)
+            )
 
     def test_build_evidence_browser_sort_allow_list_fallback(self):
         with tempfile.TemporaryDirectory() as tmpdir:

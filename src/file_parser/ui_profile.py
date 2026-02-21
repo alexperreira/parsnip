@@ -3,7 +3,7 @@ from typing import Optional
 
 from loaders.store import connect_db
 
-from file_parser.ui_shell import WidgetState, build_widget_error
+from file_parser.ui_shell import SharedFilterState, WidgetState, build_widget_error, resolve_case_filter
 
 
 @dataclass(frozen=True)
@@ -127,14 +127,16 @@ def build_person_profile(
     person_id: int,
     event_limit: int = 100,
     evidence_limit: int = 100,
+    shared_filters: Optional[SharedFilterState] = None,
 ) -> ProfileResult:
-    case_key = (case_id_norm or "").strip()
-    if not case_key or int(person_id) <= 0:
+    case_key = (resolve_case_filter(case_id_norm, shared_filters) or "").strip()
+    effective_person_id = int(shared_filters.person_id) if shared_filters and shared_filters.person_id else int(person_id)
+    if not case_key or effective_person_id <= 0:
         return ProfileResult(
             status=404,
             code="person_not_found",
             case_id_norm=case_key,
-            person_id=int(person_id),
+            person_id=effective_person_id,
             identity=None,
             linked_events=[],
             linked_evidence=[],
@@ -153,7 +155,7 @@ def build_person_profile(
                 status=404,
                 code="person_not_found",
                 case_id_norm=case_key,
-                person_id=int(person_id),
+                person_id=effective_person_id,
                 identity=None,
                 linked_events=[],
                 linked_evidence=[],
@@ -163,27 +165,27 @@ def build_person_profile(
         cluster_row = conn.execute(
             "SELECT person_id, display_name, display_name_norm, dob "
             "FROM person_clusters WHERE person_id=?",
-            (int(person_id),),
+            (effective_person_id,),
         ).fetchone()
         if not cluster_row:
             return ProfileResult(
                 status=404,
                 code="person_not_found",
                 case_id_norm=case_key,
-                person_id=int(person_id),
+                person_id=effective_person_id,
                 identity=None,
                 linked_events=[],
                 linked_evidence=[],
                 widget_states=[build_widget_error("profile", "person_not_found")],
             )
 
-        case_chunk_count = _prepare_person_case_chunks(conn, case_key, int(person_id))
+        case_chunk_count = _prepare_person_case_chunks(conn, case_key, effective_person_id)
         if case_chunk_count <= 0:
             return ProfileResult(
                 status=404,
                 code="person_not_in_case",
                 case_id_norm=case_key,
-                person_id=int(person_id),
+                person_id=effective_person_id,
                 identity=None,
                 linked_events=[],
                 linked_evidence=[],
@@ -196,7 +198,7 @@ def build_person_profile(
             "JOIN ui_person_case_chunks c ON c.file_id=o.file_id AND c.chunk_id=o.chunk_id "
             "WHERE m.person_id=? AND TRIM(o.name) != '' "
             "ORDER BY LOWER(o.name) ASC, o.name ASC",
-            (int(person_id),),
+            (effective_person_id,),
         ).fetchall()
         aliases = [str(name) for (name,) in aliases_rows if isinstance(name, str) and name.strip()]
 
@@ -209,14 +211,14 @@ def build_person_profile(
                 "JOIN person_cluster_members rm ON rm.obs_id=r.right_obs_id "
                 "WHERE lm.person_id=? AND rm.person_id=? "
                 "GROUP BY r.decision",
-                (int(person_id), int(person_id)),
+                (effective_person_id, effective_person_id),
             ).fetchall()
             for decision, count in merge_rows:
                 if isinstance(decision, str) and decision in merge_counts:
                     merge_counts[decision] = int(count)
 
         identity = ProfileIdentity(
-            person_id=int(cluster_row[0]),
+            person_id=effective_person_id,
             display_name=str(cluster_row[1]),
             display_name_norm=str(cluster_row[2]),
             dob=str(cluster_row[3]) if isinstance(cluster_row[3], str) and cluster_row[3].strip() else None,
@@ -230,7 +232,21 @@ def build_person_profile(
         widget_states.append(WidgetState(widget_id="identity", status="ready"))
 
         linked_events: list[LinkedEvent] = []
+        confidence_min = shared_filters.confidence_min if shared_filters else None
+        date_start = shared_filters.date_start if shared_filters else None
+        date_end = shared_filters.date_end if shared_filters else None
         if _table_exists(conn, "events") and _table_exists(conn, "event_cases"):
+            event_filter_sql = ""
+            event_filter_params: list = []
+            if confidence_min is not None:
+                event_filter_sql += " AND COALESCE(e.confidence, -1.0) >= ?"
+                event_filter_params.append(float(confidence_min))
+            if isinstance(date_start, str) and date_start.strip():
+                event_filter_sql += " AND COALESCE(et.date_start, '') >= ?"
+                event_filter_params.append(date_start.strip())
+            if isinstance(date_end, str) and date_end.strip():
+                event_filter_sql += " AND COALESCE(et.date_start, '') <= ?"
+                event_filter_params.append(date_end.strip())
             rows = conn.execute(
                 "SELECT e.event_id, e.event, e.date, et.date_start, COALESCE(et.status, 'missing') AS status, "
                 "e.confidence, e.file_id, e.chunk_id, e.page_start, e.page_end "
@@ -238,11 +254,11 @@ def build_person_profile(
                 "JOIN event_cases ec ON ec.event_id=e.event_id "
                 "JOIN ui_person_case_chunks c ON c.file_id=e.file_id AND c.chunk_id=e.chunk_id "
                 "LEFT JOIN event_times et ON et.event_id=e.event_id "
-                "WHERE ec.case_id_norm=? "
+                "WHERE ec.case_id_norm=? " + event_filter_sql +
                 "ORDER BY CASE WHEN COALESCE(et.status, 'missing')='ok' THEN 0 ELSE 1 END ASC, "
                 "COALESCE(et.date_start, '') ASC, e.event_id ASC "
                 "LIMIT ?",
-                (case_key, int(event_limit)),
+                tuple([case_key] + event_filter_params + [int(event_limit)]),
             ).fetchall()
             linked_events = [
                 LinkedEvent(
@@ -299,11 +315,14 @@ def build_person_profile(
                 sql = (
                     "SELECT source_table, record_id, file_id, chunk_id, page_start, page_end, confidence, quote "
                     "FROM (" + " UNION ALL ".join(union_parts) + ") "
-                    "ORDER BY file_id ASC, chunk_id ASC, COALESCE(page_start, 0) ASC, "
-                    "COALESCE(page_end, 0) ASC, source_table ASC, record_id ASC "
-                    "LIMIT ?"
+                    + ("WHERE COALESCE(confidence, -1.0) >= ? " if confidence_min is not None else "")
+                    + "ORDER BY file_id ASC, chunk_id ASC, COALESCE(page_start, 0) ASC, "
+                    + "COALESCE(page_end, 0) ASC, source_table ASC, record_id ASC "
+                    + "LIMIT ?"
                 )
-                params = [int(person_id)] if _table_exists(conn, "entities") else []
+                params = [effective_person_id] if _table_exists(conn, "entities") else []
+                if confidence_min is not None:
+                    params.append(float(confidence_min))
                 params.append(int(evidence_limit))
                 rows = conn.execute(sql, tuple(params)).fetchall()
                 linked_evidence = [
@@ -329,7 +348,7 @@ def build_person_profile(
             status=200,
             code="ok",
             case_id_norm=case_key,
-            person_id=int(person_id),
+            person_id=effective_person_id,
             identity=identity,
             linked_events=linked_events,
             linked_evidence=linked_evidence,

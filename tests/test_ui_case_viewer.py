@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from file_parser.ui_case_viewer import build_case_view
+from file_parser.ui_shell import SharedFilterState
 from loaders.store import connect_db, ensure_schema
 
 
@@ -88,6 +89,15 @@ class TestUiCaseViewer(unittest.TestCase):
             self.assertTrue(len(result.evidence) > 0)
             self.assertEqual([w.widget_id for w in result.widget_states], ["summary", "linked_entities", "recent_evidence"])
             self.assertTrue(all(w.status in {"ready", "empty"} for w in result.widget_states))
+
+            filtered = build_case_view(
+                str(db_path),
+                "ignored-case",
+                shared_filters=SharedFilterState(case_id_norm="case-1", confidence_min=0.85),
+            )
+            self.assertEqual(filtered.status, 200)
+            self.assertEqual(filtered.case_id_norm, "case-1")
+            self.assertTrue(all(entity.max_confidence >= 0.85 for entity in filtered.linked_entities))
 
     def test_build_case_view_not_found(self):
         with tempfile.TemporaryDirectory() as tmpdir:
