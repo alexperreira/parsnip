@@ -27,22 +27,40 @@ Storage staging must follow `docs/GRAPH_DB_DECISION.md`:
 
 Before choosing a graph engine or schema details, write down 5–10 concrete queries (with expected scale):
 
-- [ ] **Case overview**
-  - Given `case_id_norm`, list key people, events, and conversation threads with evidence.
-- [ ] **Person profile**
-  - Given `person_id`, list aliases, linked cases, linked events, top conversation threads, evidence.
-- [ ] **Person ↔ person traversal**
-  - “People within 2 hops of person X via shared conversation thread/event/case,” with constraints.
-- [ ] **Event storyline**
-  - For a case, return events ordered by `event_times.date_start`, including linked participants.
-- [ ] **Explainability**
-  - For any edge in results, show the evidence pointers that created it.
+- [x] **Case overview**
+  - Input: `case_id_norm`, optional `date_start/date_end`, optional `limit_*`.
+  - Output: top people (by edge count + recency), ordered events, top conversation threads, plus evidence links.
+  - Evidence requirement: every surfaced relationship must be traceable to `(file_id, chunk_id, page_*, source_phase)`.
+- [x] **Person profile**
+  - Input: `person_id`, optional `case_id_norm`, optional `date_start/date_end`.
+  - Output: aliases/observations, linked cases, linked events, top conversation threads, plus evidence links.
+  - Evidence requirement: “why linked” must be explainable (edge evidence + confidence).
+- [x] **Person ↔ person traversal**
+  - Input: `person_id`, `hops in {1,2}`, optional constraints: `case_id_norm`, date range, edge types allowed.
+  - Output: reachable people with path summaries (edge types + counts), plus evidence links for each hop.
+  - Safety requirement: caps/limits on fanout to avoid “edge explosion” queries.
+- [x] **Event storyline**
+  - Input: `case_id_norm`, optional date range.
+  - Output: events ordered by normalized `event_times.date_start`, each with participants + evidence.
+  - Correctness requirement: timeline ordering uses Phase 9 normalization outputs (status-aware).
+- [x] **Explainability**
+  - Input: edge ID or `(src, edge_type, dst)` plus optional evidence filters.
+  - Output: the evidence rows that created/justified the edge (no raw quotes by default).
+
+Scale assumptions for v0 (to validate in real data):
+
+- Total documents up to ~3.5M (per `docs/GRAPH_DB_DECISION.md`).
+- Graph scope for most interactive work is per-case (case neighborhoods), not global all-nodes traversals.
 
 Acceptance criteria should include:
 
-- [ ] Target latency class (batch-only vs interactive).
+- [x] Target latency class (batch-only vs interactive).
+  - Stage 1 (SQLite edges): batch build + offline analysis queries are acceptable.
+  - Stage 3 (graph DB mirror): interactive traversal (1–2 hops) becomes a goal *only if triggers are met*.
 - [ ] Edge volumes (edges per person, per case, total edges).
-- [ ] Redaction policy for logs/summaries (no raw quotes by default).
+  - Measure from SQLite once Stage 1 edge tables exist; set caps and indexing based on observed distributions.
+- [x] Redaction policy for logs/summaries (no raw quotes by default).
+  - Store evidence pointers; log only counts + hashed/redacted samples. Quotes remain opt-in.
 
 ## Data model (canonical property graph)
 
@@ -56,6 +74,25 @@ Define a small, stable set of node types and edge types. Prefer **fewer primitiv
 - Optional (later, if it pays off):
   - `ConversationThread(thread_id)` from `conversation_threads.thread_id` (Phase 10)
   - `Document(file_id)` from `files.file_id` (Phase 6 load_manifest)
+
+Node properties (KG schema v1):
+
+- `Person`
+  - Required: `person_id`, `display_name`, `display_name_norm`
+  - Optional: `dob`
+- `Event`
+  - Required: `event_id`, `event` (text)
+  - Optional: `date_raw` (source string), normalized fields from Phase 9 (`date_start/date_end/precision/status`)
+- `Case`
+  - Required: `case_id_norm`
+  - Optional: `case_id_display` (one representative raw form), `sources` (provenance summary)
+- `ConversationThread` (optional)
+  - Required: `thread_id`, `case_id_norm`, `thread_key`
+  - Optional: `label`, `label_method`
+- `Document` (optional)
+  - Required: `file_id`
+  - Optional: `source_type`, `mtime_utc`, `size_bytes`
+  - Do not export raw filesystem paths by default (`container_path`, `virtual_path`) unless explicitly needed.
 
 ### Edges (all edges carry evidence)
 
@@ -76,17 +113,25 @@ Evidence pointer fields (required on every edge):
 - `file_id`, `chunk_id`, `page_start`, `page_end`, `quote` (quote optional/off by default)
 - `confidence`, `source_phase`, `extractor_version`, `created_utc`
 
+Edge identity (deterministic):
+
+- Canonical logical edge key: `(src_type, src_id, edge_type, dst_type, dst_id)`.
+- Evidence rows are append-only and uniquely keyed so reruns are idempotent (no duplicate evidence inserts).
+
 ## Implementation plan (staged)
 
 ### Phase A — Specify graph outputs and invariants (paper design)
 
 Deliverables:
 
-- [ ] A one-page list of **must-answer queries** with example inputs/outputs and scale assumptions.
-- [ ] A canonical **node/edge schema** (types + required properties).
-- [ ] Determinism rules:
-  - [ ] stable IDs only (no UUIDs unless derived deterministically)
-  - [ ] sorted/partitioned exports for repeatable builds
+- [x] A one-page list of **must-answer queries** with example inputs/outputs and scale assumptions.
+- [x] A canonical **node/edge schema** (types + required properties).
+  - Node/edge contract version: `kg_schema_version = 1` (bump only when breaking).
+- [x] Determinism rules:
+  - [x] stable IDs only (no UUIDs unless derived deterministically)
+  - [x] sorted/partitioned exports for repeatable builds
+  - [x] idempotent edge materialization (unique keys + `INSERT OR IGNORE` semantics)
+  - [x] evidence-first (edges may be many-to-one; do not collapse evidence lossily)
 
 ### Phase B — Stage 1 storage: “SQL-first graph shape” (SQLite)
 
