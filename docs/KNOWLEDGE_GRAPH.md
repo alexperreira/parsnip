@@ -59,6 +59,7 @@ Acceptance criteria should include:
   - Stage 3 (graph DB mirror): interactive traversal (1–2 hops) becomes a goal *only if triggers are met*.
 - [ ] Edge volumes (edges per person, per case, total edges).
   - Measure from SQLite once Stage 1 edge tables exist; set caps and indexing based on observed distributions.
+  - Intentionally left unchecked until Stage 1 edge tables exist and we can measure real distributions.
 - [x] Redaction policy for logs/summaries (no raw quotes by default).
   - Store evidence pointers; log only counts + hashed/redacted samples. Quotes remain opt-in.
 
