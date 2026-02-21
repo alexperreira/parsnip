@@ -128,7 +128,7 @@ UI v1 reads from existing tables only; no UI-owned derived persistence.
 - [x] Define UI information architecture (routes, top-level nav, shared layout regions).
 - [x] Produce low-fidelity wireframes for: case viewer, profile page, timeline, evidence browser.
 - [x] Define design tokens (color, typography, spacing, elevation, focus states).
-- [ ] Specify reusable component contracts (table, faceted filters, entity chip, provenance badge, confidence tag, timeline row).
+- [x] Specify reusable component contracts (table, faceted filters, entity chip, provenance badge, confidence tag, timeline row).
 - [ ] Draft API contract for read models required by each screen (including pagination, sorting, filtering params).
 - [ ] Define observability schema for UI telemetry and redacted error reporting.
 - [ ] Create accessibility checklist (keyboard flow, focus order, contrast, screen-reader labels).
