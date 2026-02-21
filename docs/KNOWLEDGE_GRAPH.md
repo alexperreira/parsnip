@@ -140,17 +140,21 @@ Goal: represent the knowledge graph *explicitly* in SQLite so it’s auditable, 
 
 Work items:
 
-- [ ] Add/standardize a `cases` table keyed by `case_id_norm` (display form + provenance).
-- [ ] Add explicit edge tables (or one generic edge table) with:
-  - [ ] `(src_type, src_id, edge_type, dst_type, dst_id)` + evidence pointers + confidence/versioning
-  - [ ] unique constraints to ensure idempotence (`INSERT OR IGNORE` style)
-- [ ] Backfill edges deterministically from existing tables:
-  - [ ] `event_cases` ⇒ `Event IN_CASE Case`
-  - [ ] `person_cluster_members` + `person_observations` joined on `(file_id, chunk_id)` with `events`
+- [x] Add/standardize a `cases` table keyed by `case_id_norm` (display form + provenance).
+- [x] Add explicit edge tables (or one generic edge table) with:
+  - [x] `(src_type, src_id, edge_type, dst_type, dst_id)` + evidence pointers + confidence/versioning
+  - [x] unique constraints to ensure idempotence (`INSERT OR IGNORE` style)
+- [x] Backfill edges deterministically from existing tables:
+  - [x] `event_cases` ⇒ `Event IN_CASE Case`
+  - [x] `person_cluster_members` + `person_observations` joined on `(file_id, chunk_id)` with `events`
     ⇒ `Person MENTIONED_IN_EVENT Event`
-  - [ ] `identity_signals(attribute='case_id')` attached to a person observation/cluster
+  - [x] `identity_signals(attribute='case_id')` attached to a person observation/cluster
     ⇒ `Person IN_CASE Case`
-- [ ] Add indexes aligned to the must-answer queries (case_id_norm, person_id, event_id, edge_type).
+- [x] Add indexes aligned to the must-answer queries (case_id_norm, person_id, event_id, edge_type).
+
+Phase B entry point:
+
+- `PYTHONPATH=src python -m knowledge_graph.phase11_materialize_edges --db output/store.sqlite --reset`
 
 Notes:
 

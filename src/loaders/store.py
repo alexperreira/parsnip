@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = "5"
+SCHEMA_VERSION = "6"
 
 
 def connect_db(db_path):
@@ -15,6 +15,9 @@ def connect_db(db_path):
 def ensure_schema(conn, overwrite=False):
     if overwrite:
         for table in (
+            "kg_edge_evidence",
+            "kg_edges",
+            "cases",
             "conversation_thread_participants",
             "conversation_thread_segments",
             "conversation_threads",
@@ -35,6 +38,49 @@ def ensure_schema(conn, overwrite=False):
             "meta",
         ):
             conn.execute(f"DROP TABLE IF EXISTS {table}")
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS cases ("
+        "case_id_norm TEXT PRIMARY KEY,"
+        "case_id_display TEXT,"
+        "sources_json TEXT"
+        ")"
+    )
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS kg_edges ("
+        "src_type TEXT NOT NULL,"
+        "src_id TEXT NOT NULL,"
+        "edge_type TEXT NOT NULL,"
+        "dst_type TEXT NOT NULL,"
+        "dst_id TEXT NOT NULL,"
+        "created_utc TEXT NOT NULL,"
+        "PRIMARY KEY(src_type, src_id, edge_type, dst_type, dst_id)"
+        ")"
+    )
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS kg_edge_evidence ("
+        "evidence_id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "src_type TEXT NOT NULL,"
+        "src_id TEXT NOT NULL,"
+        "edge_type TEXT NOT NULL,"
+        "dst_type TEXT NOT NULL,"
+        "dst_id TEXT NOT NULL,"
+        "file_id TEXT NOT NULL,"
+        "chunk_id TEXT NOT NULL,"
+        "page_start INTEGER NOT NULL,"
+        "page_end INTEGER NOT NULL,"
+        "confidence REAL,"
+        "source_phase TEXT NOT NULL,"
+        "extractor_version TEXT NOT NULL,"
+        "created_utc TEXT NOT NULL,"
+        "UNIQUE("
+        "src_type, src_id, edge_type, dst_type, dst_id, "
+        "file_id, chunk_id, page_start, page_end, source_phase, extractor_version"
+        ")"
+        ")"
+    )
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS files ("
@@ -302,6 +348,14 @@ def ensure_schema(conn, overwrite=False):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_files_mtime ON files(mtime_utc)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_event_times_start ON event_times(date_start)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_event_cases_case ON event_cases(case_id_norm)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cases_norm ON cases(case_id_norm)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_kg_edges_src ON kg_edges(src_type, src_id, edge_type)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_kg_edges_dst ON kg_edges(dst_type, dst_id, edge_type)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_kg_evidence_file ON kg_edge_evidence(file_id, chunk_id)")
     conn.commit()
 
 
