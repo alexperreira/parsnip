@@ -245,11 +245,11 @@ Redacted samples (optional debug):
 - [x] Implement scoring + decision thresholds with explainable reason codes.
 - [x] Implement clustering (union-find) and thread materialization tables.
 - [x] Implement deterministic topic labeling (`keywords_v1`) and store `label_method`.
-- [ ] (Optional) Implement LLM label refinement behind explicit flags; default must remain deterministic/offline.
+- [x] (Optional) Implement LLM label refinement behind explicit flags; default must remain deterministic/offline.
 - [x] Add CLI integration (`fileparse thread`) and wire into `fileparse run --steps …`.
 - [x] Add Phase 7 validation checks for the new tables (row counts, foreign key shape, idempotency on reruns).
-- [ ] Add tests:
-  - [ ] unit tests for normalization/tokenization determinism
-  - [ ] unit tests for candidate generation caps
-  - [ ] unit tests for clustering determinism on a tiny synthetic DB
-  - [ ] regression test: rerun threading twice => identical thread assignments
+- [x] Add tests:
+  - [x] unit tests for normalization/tokenization determinism
+  - [x] unit tests for candidate generation caps
+  - [x] unit tests for clustering determinism on a tiny synthetic DB
+  - [x] regression test: rerun threading twice => identical thread assignments

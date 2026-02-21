@@ -3,10 +3,13 @@ import hashlib
 import json
 import re
 import time
+import urllib.error
+import urllib.request
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import Optional
 
 from file_parser.compress_io import open_text_reader
 from loaders.store import connect_db, ensure_schema
@@ -112,6 +115,50 @@ def _parse_args():
         help="Clear existing conversation threading tables before rebuilding (default: true).",
     )
     parser.add_argument(
+        "--llm-label",
+        action="store_true",
+        help="Optionally refine thread labels using a local LLM (off by default).",
+    )
+    parser.add_argument(
+        "--include-quotes-for-labeling",
+        action="store_true",
+        help="Include short raw quotes in the labeler prompt (OFF by default; use with care).",
+    )
+    parser.add_argument(
+        "--model",
+        default="llama3",
+        help="Ollama model name for --llm-label (default: llama3).",
+    )
+    parser.add_argument(
+        "--host",
+        default="http://localhost:11434",
+        help="Ollama host for --llm-label (default: http://localhost:11434).",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=60,
+        help="Request timeout in seconds for --llm-label (default: 60).",
+    )
+    parser.add_argument(
+        "--max-label-threads",
+        type=int,
+        default=None,
+        help="Optional cap on threads sent to the labeler (default: no limit).",
+    )
+    parser.add_argument(
+        "--max-quotes-per-thread",
+        type=int,
+        default=6,
+        help="Max quotes included per thread when --include-quotes-for-labeling is set (default: 6).",
+    )
+    parser.add_argument(
+        "--max-quote-chars",
+        type=int,
+        default=160,
+        help="Max characters per quote included in labeler prompt (default: 160).",
+    )
+    parser.add_argument(
         "--max-segments",
         type=int,
         default=None,
@@ -146,7 +193,7 @@ def _table_exists(conn, name: str) -> bool:
     return bool(row)
 
 
-def _normalize_text(value: str) -> str | None:
+def _normalize_text(value: str) -> Optional[str]:
     if not isinstance(value, str):
         return None
     value = value.strip().lower()
@@ -181,7 +228,7 @@ def _sha256_hex(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _parse_iso_date(value: str) -> date | None:
+def _parse_iso_date(value: str) -> Optional[date]:
     if not isinstance(value, str) or not value.strip():
         return None
     try:
@@ -200,7 +247,7 @@ def _jaccard(a: set[str], b: set[str]) -> float:
     return inter / union if union else 0.0
 
 
-def _time_bonus(a: str | None, b: str | None) -> tuple[float, str | None]:
+def _time_bonus(a: Optional[str], b: Optional[str]):
     left = _parse_iso_date(a) if a else None
     right = _parse_iso_date(b) if b else None
     if not left or not right:
@@ -261,7 +308,7 @@ def _load_person_display_map(conn) -> dict[str, int]:
     return mapping
 
 
-def _file_anchor_date(conn, file_id: str, cache: dict[str, str | None]) -> str | None:
+def _file_anchor_date(conn, file_id: str, cache):
     if file_id in cache:
         return cache[file_id]
     if not _table_exists(conn, "files"):
@@ -339,12 +386,66 @@ def _update_anchor_dates_from_manifest(conn, manifest_path: Path):
     return {"manifest_records_total": total, "manifest_anchor_updates": updated}
 
 
+def _build_label_prompt(
+    participant_keys: list[str],
+    top_tokens: list[str],
+    quotes: Optional[list[str]] = None,
+):
+    payload = {
+        "participants": participant_keys[:10],
+        "keywords": top_tokens[:15],
+    }
+    if quotes:
+        payload["quotes"] = quotes[:10]
+    return (
+        "You are an information labeling engine. "
+        "Return ONLY valid JSON with this schema:\n"
+        '{ "label": string }\n'
+        "The label must be a short human-readable topic label (max ~80 chars). "
+        "Do not include case IDs. Do not include quotes. "
+        "If unsure, use a generic label.\n\n"
+        f"INPUT_JSON:\n{json.dumps(payload, ensure_ascii=True)}"
+    )
+
+
+def _call_ollama(prompt: str, model: str, host: str, timeout: int) -> str:
+    url = host.rstrip("/") + "/api/generate"
+    body = json.dumps(
+        {"model": model, "prompt": prompt, "stream": False, "options": {"temperature": 0}},
+        ensure_ascii=True,
+    ).encode("utf-8")
+    request = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        raw = response.read().decode("utf-8")
+    parsed = json.loads(raw)
+    return parsed.get("response", "") or ""
+
+
+def _parse_label_response(text: str) -> Optional[str]:
+    if not isinstance(text, str) or not text.strip():
+        return None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    label = payload.get("label")
+    if not isinstance(label, str):
+        return None
+    label = label.strip()
+    if not label:
+        return None
+    # Keep it small and stable.
+    if len(label) > 120:
+        label = label[:120].rstrip()
+    return label
+
+
 @dataclass(frozen=True)
 class _Segment:
     segment_id: int
     file_id: str
     chunk_id: str
-    anchor_date: str | None
+    anchor_date: Optional[str]
     participant_keys: set[str]
     participants: list[dict]
     topic_tokens: set[str]
@@ -404,6 +505,14 @@ def build_thread_conversations(
     chunks_path=None,
     manifest_path=None,
     reset=True,
+    llm_label=False,
+    include_quotes_for_labeling=False,
+    llm_model="llama3",
+    llm_host="http://localhost:11434",
+    llm_timeout=60,
+    max_label_threads=None,
+    max_quotes_per_thread=6,
+    max_quote_chars=160,
     max_segments=None,
     max_key_fanout=200,
     max_candidates=500,
@@ -417,7 +526,7 @@ def build_thread_conversations(
     has_event_cases = _table_exists(conn, "event_cases") and _table_exists(conn, "events")
 
     person_display_map = _load_person_display_map(conn)
-    file_anchor_cache: dict[str, str | None] = {}
+    file_anchor_cache = {}
 
     summary = {
         "utterances_total": 0,
@@ -432,6 +541,9 @@ def build_thread_conversations(
         "threads_created": 0,
         "thread_memberships": 0,
         "thread_participants": 0,
+        "llm_label_attempted": 0,
+        "llm_label_ok": 0,
+        "llm_label_errors": 0,
     }
 
     cursor = conn.execute(
@@ -715,12 +827,77 @@ def build_thread_conversations(
             segment_fps = sorted([f"{s.file_id}:{s.chunk_id}" for s in cluster_segments])
             thread_key = _sha256_hex(case_id_norm + "|" + ",".join(segment_fps))
             label = _label_thread(cluster_segments)
+            label_method = "keywords_v1"
+
+            if llm_label:
+                if max_label_threads is None or summary["llm_label_attempted"] < int(max_label_threads):
+                    summary["llm_label_attempted"] += 1
+                    participant_keys = sorted(
+                        {pk for seg in cluster_segments for pk in seg.participant_keys}
+                    )
+                    token_counts = Counter()
+                    for seg in cluster_segments:
+                        token_counts.update(seg.top_tokens)
+                    top_tokens = [
+                        t
+                        for t, _ in sorted(token_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+                        if t
+                    ][:15]
+
+                    quotes = None
+                    if include_quotes_for_labeling:
+                        quotes = []
+                        seen = set()
+                        remaining = int(max_quotes_per_thread)
+                        for seg in cluster_segments:
+                            if remaining <= 0:
+                                break
+                            quote_rows = conn.execute(
+                                "SELECT quote FROM conversations "
+                                "WHERE file_id=? AND chunk_id=? "
+                                "ORDER BY conversation_id LIMIT ?",
+                                (seg.file_id, seg.chunk_id, remaining),
+                            ).fetchall()
+                            for (q,) in quote_rows:
+                                if remaining <= 0:
+                                    break
+                                if not isinstance(q, str) or not q.strip():
+                                    continue
+                                q = q.strip().replace("\n", " ")
+                                if len(q) > int(max_quote_chars):
+                                    q = q[: int(max_quote_chars)].rstrip()
+                                if q in seen:
+                                    continue
+                                seen.add(q)
+                                quotes.append(q)
+                                remaining -= 1
+
+                    prompt = _build_label_prompt(
+                        participant_keys=participant_keys,
+                        top_tokens=top_tokens,
+                        quotes=quotes,
+                    )
+                    try:
+                        response_text = _call_ollama(
+                            prompt=prompt, model=str(llm_model), host=str(llm_host), timeout=int(llm_timeout)
+                        )
+                        refined = _parse_label_response(response_text)
+                        if refined:
+                            label = refined
+                            label_method = "llm_v1"
+                            summary["llm_label_ok"] += 1
+                        else:
+                            summary["llm_label_errors"] += 1
+                    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError):
+                        summary["llm_label_errors"] += 1
+                    except Exception:
+                        summary["llm_label_errors"] += 1
 
             conn.execute(
                 "INSERT OR IGNORE INTO conversation_threads("
                 "case_id_norm, thread_key, label, label_method, created_utc"
                 ") VALUES (?, ?, ?, ?, datetime('now'))",
-                (case_id_norm, thread_key, label, "keywords_v1"),
+                (case_id_norm, thread_key, label, label_method),
             )
             row = conn.execute(
                 "SELECT thread_id FROM conversation_threads WHERE case_id_norm=? AND thread_key=?",
@@ -835,6 +1012,9 @@ def build_thread_conversations(
         "elapsed_seconds": elapsed,
         "config": {
             "reset": bool(reset),
+            "llm_label": bool(llm_label),
+            "include_quotes_for_labeling": bool(include_quotes_for_labeling),
+            "llm_model": str(llm_model),
             "max_segments": max_segments,
             "max_key_fanout": int(max_key_fanout),
             "max_candidates": int(max_candidates),
@@ -849,6 +1029,14 @@ def main():
         chunks_path=args.chunks,
         manifest_path=args.manifest,
         reset=args.reset,
+        llm_label=args.llm_label,
+        include_quotes_for_labeling=args.include_quotes_for_labeling,
+        llm_model=args.model,
+        llm_host=args.host,
+        llm_timeout=args.timeout,
+        max_label_threads=args.max_label_threads,
+        max_quotes_per_thread=args.max_quotes_per_thread,
+        max_quote_chars=args.max_quote_chars,
         max_segments=args.max_segments,
         max_key_fanout=args.max_key_fanout,
         max_candidates=args.max_candidates,
@@ -869,6 +1057,10 @@ def main():
     print(f"  threads_created: {s['threads_created']}")
     print(f"  thread_memberships: {s['thread_memberships']}")
     print(f"  thread_participants: {s['thread_participants']}")
+    if s.get("llm_label_attempted"):
+        print(f"  llm_label_attempted: {s['llm_label_attempted']}")
+        print(f"  llm_label_ok: {s['llm_label_ok']}")
+        print(f"  llm_label_errors: {s['llm_label_errors']}")
     if result["anchors"]:
         a = result["anchors"]
         if "chunk_anchor_updates" in a:
