@@ -142,7 +142,7 @@ UI v1 reads from existing tables only; no UI-owned derived persistence.
 - [x] Implement case viewer with summary + evidence counts + linked entities.
 - [x] Implement character profile page with alias visibility and linked events/evidence.
 - [x] Implement interactive timeline with normalized/unresolved date handling and source drill-down.
-- [ ] Implement evidence browser with faceted filtering, pagination, and document-page provenance links.
+- [x] Implement evidence browser with faceted filtering, pagination, and document-page provenance links.
 - [ ] Integrate dedupe and conversation-thread indicators where available from backend outputs.
 - [ ] Add cross-screen shared filters (case, person, date range, confidence) with URL-state persistence.
 - [ ] Add loading/empty/error states and fail-soft widget-level recovery behavior.
