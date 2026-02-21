@@ -131,7 +131,7 @@ UI v1 reads from existing tables only; no UI-owned derived persistence.
 - [x] Specify reusable component contracts (table, faceted filters, entity chip, provenance badge, confidence tag, timeline row).
 - [x] Draft API contract for read models required by each screen (including pagination, sorting, filtering params).
 - [x] Define observability schema for UI telemetry and redacted error reporting.
-- [ ] Create accessibility checklist (keyboard flow, focus order, contrast, screen-reader labels).
+- [x] Create accessibility checklist (keyboard flow, focus order, contrast, screen-reader labels).
 - [ ] Write acceptance criteria per screen with deterministic expected behavior.
 
 ## Sequential Workstream (must be completed in order)
@@ -140,7 +140,7 @@ UI v1 reads from existing tables only; no UI-owned derived persistence.
 - [x] Lock data contracts against current pipeline outputs (entities, timeline events, evidence metadata).
 - [x] Implement app shell and navigation skeleton with route guards and error boundaries.
 - [x] Implement case viewer with summary + evidence counts + linked entities.
-- [ ] Implement character profile page with alias visibility and linked events/evidence.
+- [x] Implement character profile page with alias visibility and linked events/evidence.
 - [ ] Implement interactive timeline with normalized/unresolved date handling and source drill-down.
 - [ ] Implement evidence browser with faceted filtering, pagination, and document-page provenance links.
 - [ ] Integrate dedupe and conversation-thread indicators where available from backend outputs.
