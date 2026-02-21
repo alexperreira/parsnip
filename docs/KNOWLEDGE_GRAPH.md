@@ -183,14 +183,19 @@ Only start this phase when `docs/GRAPH_DB_DECISION.md` triggers apply (traversal
 
 Work items:
 
-- [ ] Pick one graph engine for the *first* integration (opt for operational simplicity):
-  - [ ] Neo4j (property graph) is the most direct fit for node/edge modeling.
-  - [ ] Keep SQLite as system-of-record; the graph DB is a read-optimized mirror at first.
-- [ ] Write an ingestion tool that loads the Phase C exports into the graph DB deterministically.
-- [ ] Implement a minimal query layer that answers the must-answer queries, with edge-level evidence links
+- [x] Pick one graph engine for the *first* integration (opt for operational simplicity):
+  - [x] Neo4j (property graph) is the most direct fit for node/edge modeling.
+  - [x] Keep SQLite as system-of-record; the graph DB is a read-optimized mirror at first.
+- [x] Write an ingestion tool that loads the Phase C exports into the graph DB deterministically.
+- [x] Implement a minimal query layer that answers the must-answer queries, with edge-level evidence links
   back to SQLite rows (or exported evidence IDs).
 - [ ] Add parity checks:
   - [ ] for a sample of cases/people, compare query results between SQLite joins and graph traversal.
+
+Phase D entry point (Cypher generator + query templates):
+
+- Generate Neo4j Cypher import: `PYTHONPATH=src python -m knowledge_graph.phase12_graphdb_mirror --kg-dir output/kg --out output/kg/neo4j_import.cypher`
+- Print query template: `PYTHONPATH=src python -m knowledge_graph.phase12_graphdb_mirror --print-query case_overview`
 
 ### Phase E — Cutover strategy (optional, later)
 
