@@ -167,15 +167,15 @@ Goal: make the graph portable without committing to a specific graph DB too earl
 
 Work items:
 
-- [ ] Define an export format:
-  - [ ] `output/kg/nodes/*.jsonl.zst` and `output/kg/edges/*.jsonl.zst`
-  - [ ] stable ordering (by type, then ID) so diffs are meaningful
-- [ ] Add a single CLI entry point (proposed):
-  - [ ] `PYTHONPATH=src python -m knowledge_graph.phase11_build_kg --db output/store.sqlite --out output/kg`
-- [ ] Add lightweight validation on export:
-  - [ ] referential integrity (every edge endpoint exists)
-  - [ ] required properties present
-  - [ ] counts + top-k edge types summary (no raw values)
+- [x] Define an export format:
+  - [x] `output/kg/nodes/*.jsonl.zst` and `output/kg/edges/*.jsonl.zst`
+  - [x] stable ordering (by type, then ID) so diffs are meaningful
+- [x] Add a single CLI entry point:
+  - [x] `PYTHONPATH=src python -m knowledge_graph.phase11_build_kg --db output/store.sqlite --out output/kg`
+- [x] Add lightweight validation on export:
+  - [x] referential integrity (every edge endpoint exists)
+  - [x] required properties present
+  - [x] counts + top-k edge types summary (no raw values)
 
 ### Phase D — Stage 3: Graph DB mirror + traversal queries (when triggers are met)
 
