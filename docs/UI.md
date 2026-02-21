@@ -127,7 +127,7 @@ UI v1 reads from existing tables only; no UI-owned derived persistence.
 
 - [x] Define UI information architecture (routes, top-level nav, shared layout regions).
 - [x] Produce low-fidelity wireframes for: case viewer, profile page, timeline, evidence browser.
-- [ ] Define design tokens (color, typography, spacing, elevation, focus states).
+- [x] Define design tokens (color, typography, spacing, elevation, focus states).
 - [ ] Specify reusable component contracts (table, faceted filters, entity chip, provenance badge, confidence tag, timeline row).
 - [ ] Draft API contract for read models required by each screen (including pagination, sorting, filtering params).
 - [ ] Define observability schema for UI telemetry and redacted error reporting.
@@ -139,7 +139,7 @@ UI v1 reads from existing tables only; no UI-owned derived persistence.
 - [x] Confirm product path and v1 scope boundaries (investigator-first baseline from L9 option A).
 - [x] Lock data contracts against current pipeline outputs (entities, timeline events, evidence metadata).
 - [x] Implement app shell and navigation skeleton with route guards and error boundaries.
-- [ ] Implement case viewer with summary + evidence counts + linked entities.
+- [x] Implement case viewer with summary + evidence counts + linked entities.
 - [ ] Implement character profile page with alias visibility and linked events/evidence.
 - [ ] Implement interactive timeline with normalized/unresolved date handling and source drill-down.
 - [ ] Implement evidence browser with faceted filtering, pagination, and document-page provenance links.
