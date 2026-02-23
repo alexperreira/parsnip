@@ -98,7 +98,7 @@ When budget is exceeded, remaining chunks are deterministically deprioritized by
 
 Update the LLM stage to accept a chunk stream to process (rather than assuming “all chunks”):
 
-- [ ] v1: emit `chunks.selected.jsonl` and point the existing LLM extractors at it.
+- [x] v1: emit `chunks.llm_small.jsonl` / `chunks.llm_large.jsonl` (subset streams) and point the existing LLM extractors at the selected stream.
 - [ ] v2: pass a `triage.jsonl` alongside `chunks.jsonl` and let the LLM stage internally select by `route`.
 
 For multi-model routing:

@@ -24,6 +24,7 @@ from loaders.load_manifest import main as load_manifest_main
 from text_extraction.phase3_extract_text import main as phase3_main
 from timeline.phase9_stitch_timeline import main as timeline_main
 from conversation_threading.phase10_thread_conversations import main as thread_main
+from triage.phase_t1_triage_chunks import main as triage_main
 
 app = typer.Typer(
     add_completion=False,
@@ -196,6 +197,11 @@ def chunk(ctx: typer.Context):
     _dispatch_to_main("chunk", list(ctx.args), phase4_main)
 
 
+@app.command("triage", help="Run Phase T1 chunk triage (compute strategy routing).")
+def triage(ctx: typer.Context):
+    _dispatch_to_main("triage", list(ctx.args), triage_main)
+
+
 @app.command("validate", help="Run Phase 7 sanity checks.")
 def validate(ctx: typer.Context):
     _dispatch_to_main("validate", list(ctx.args), phase7_main)
@@ -224,7 +230,7 @@ def run(
     steps: str = typer.Option(
         "extract-text,chunk,llm,load,validate",
         "--steps",
-        help="Comma-separated steps: extract-text,chunk,llm,load,resolve,timeline,thread,validate.",
+        help="Comma-separated steps: extract-text,chunk,triage,llm,load,resolve,timeline,thread,validate.",
     ),
     llm_provider: str = typer.Option(
         "ollama",
@@ -256,6 +262,56 @@ def run(
         "--llm-timeout",
         help="LLM request timeout in seconds for the llm step (default: 120).",
     ),
+    triage_keyword_packs_dir: str = typer.Option(
+        None,
+        "--triage-keyword-packs-dir",
+        help="Optional keyword pack directory for triage (directory of .txt files).",
+    ),
+    triage_max_llm_chunks: int = typer.Option(
+        None,
+        "--triage-max-llm-chunks",
+        help="Cap total chunks selected for LLM during triage.",
+    ),
+    triage_max_llm_chunks_per_file: int = typer.Option(
+        None,
+        "--triage-max-llm-chunks-per-file",
+        help="Cap chunks per file_id selected for LLM during triage.",
+    ),
+    triage_max_llm_tokens: int = typer.Option(
+        None,
+        "--triage-max-llm-tokens",
+        help="Cap estimated tokens selected for LLM during triage.",
+    ),
+    triage_allow_file_ids: str = typer.Option(
+        None,
+        "--triage-allow-file-ids",
+        help="Optional newline-delimited file_id allowlist path for triage.",
+    ),
+    triage_deny_file_ids: str = typer.Option(
+        None,
+        "--triage-deny-file-ids",
+        help="Optional newline-delimited file_id denylist path for triage.",
+    ),
+    triage_ner: bool = typer.Option(
+        False,
+        "--triage-ner",
+        help="Enable optional local NER (spaCy) during triage (off by default).",
+    ),
+    triage_ner_model: str = typer.Option(
+        "en_core_web_sm",
+        "--triage-ner-model",
+        help="spaCy model name for --triage-ner (default: en_core_web_sm).",
+    ),
+    triage_route_large_threshold: float = typer.Option(
+        0.75,
+        "--triage-route-large-threshold",
+        help="Score threshold for routing to llm_large during triage.",
+    ),
+    triage_route_skip_threshold: float = typer.Option(
+        0.10,
+        "--triage-route-skip-threshold",
+        help="Score threshold below which triage routes to skip.",
+    ),
     no_interactive: bool = typer.Option(
         False,
         "--no-interactive",
@@ -267,6 +323,8 @@ def run(
     output_path = Path(output_dir)
     text_output_dir = output_path / "text"
     chunks_path = text_output_dir / "chunks.jsonl"
+    triage_small_chunks_path = output_path / "chunks.llm_small.jsonl"
+    triage_large_chunks_path = output_path / "chunks.llm_large.jsonl"
     entities_path = output_path / "entities.jsonl"
     events_path = output_path / "events.jsonl"
     conversations_path = output_path / "conversations.jsonl"
@@ -298,6 +356,37 @@ def run(
             ],
             phase4_main,
         )
+    if "triage" in selected:
+        triage_args = [
+            "--input",
+            str(chunks_path),
+            "--output-dir",
+            str(output_path),
+            "--route-large-threshold",
+            str(triage_route_large_threshold),
+            "--route-skip-threshold",
+            str(triage_route_skip_threshold),
+            "--small-output",
+            triage_small_chunks_path.name,
+            "--large-output",
+            triage_large_chunks_path.name,
+        ]
+        if triage_keyword_packs_dir:
+            triage_args.extend(["--keyword-packs-dir", str(triage_keyword_packs_dir)])
+        if triage_max_llm_chunks is not None:
+            triage_args.extend(["--max-llm-chunks", str(triage_max_llm_chunks)])
+        if triage_max_llm_chunks_per_file is not None:
+            triage_args.extend(["--max-llm-chunks-per-file", str(triage_max_llm_chunks_per_file)])
+        if triage_max_llm_tokens is not None:
+            triage_args.extend(["--max-llm-tokens", str(triage_max_llm_tokens)])
+        if triage_allow_file_ids:
+            triage_args.extend(["--allow-file-ids", str(triage_allow_file_ids)])
+        if triage_deny_file_ids:
+            triage_args.extend(["--deny-file-ids", str(triage_deny_file_ids)])
+        if triage_ner:
+            triage_args.append("--ner")
+            triage_args.extend(["--ner-model", str(triage_ner_model)])
+        _dispatch_to_main("triage", triage_args, triage_main)
     if "llm" in selected:
         llm_common_args = [
             "--provider",
@@ -313,19 +402,22 @@ def run(
             "--timeout",
             str(llm_timeout),
         ]
+        llm_chunks_path = chunks_path
+        if "triage" in selected and triage_small_chunks_path.exists():
+            llm_chunks_path = triage_small_chunks_path
         _dispatch_to_main(
             "llm entities",
-            ["--input", str(chunks_path), "--output", str(entities_path), *llm_common_args],
+            ["--input", str(llm_chunks_path), "--output", str(entities_path), *llm_common_args],
             llm_entities_main,
         )
         _dispatch_to_main(
             "llm events",
-            ["--input", str(chunks_path), "--output", str(events_path), *llm_common_args],
+            ["--input", str(llm_chunks_path), "--output", str(events_path), *llm_common_args],
             llm_events_main,
         )
         _dispatch_to_main(
             "llm conversations",
-            ["--input", str(chunks_path), "--output", str(conversations_path), *llm_common_args],
+            ["--input", str(llm_chunks_path), "--output", str(conversations_path), *llm_common_args],
             llm_conversations_main,
         )
     if "load" in selected:
