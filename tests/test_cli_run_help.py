@@ -28,6 +28,7 @@ class CliRunHelpTest(unittest.TestCase):
         self.assertIn("--llm-provider", output)
         self.assertIn("--llm-model", output)
         self.assertIn("--llm-openai-base-url", output)
+        self.assertIn("--llm-gemini-base-url", output)
 
 
 if __name__ == "__main__":

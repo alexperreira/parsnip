@@ -4,6 +4,7 @@ import time
 import urllib.error
 
 from llm.provider_client import (
+    DEFAULT_GEMINI_BASE_URL,
     DEFAULT_OLLAMA_HOST,
     DEFAULT_OPENAI_BASE_URL,
     LLMProviderConfigError,
@@ -40,7 +41,7 @@ def _parse_args():
     )
     parser.add_argument(
         "--provider",
-        choices=("ollama", "openai"),
+        choices=("ollama", "openai", "gemini"),
         default="ollama",
         help="LLM provider (default: ollama).",
     )
@@ -54,6 +55,11 @@ def _parse_args():
         "--openai-base-url",
         default=DEFAULT_OPENAI_BASE_URL,
         help=f"OpenAI API base URL for --provider=openai (default: {DEFAULT_OPENAI_BASE_URL}).",
+    )
+    parser.add_argument(
+        "--gemini-base-url",
+        default=DEFAULT_GEMINI_BASE_URL,
+        help=f"Gemini API base URL for --provider=gemini (default: {DEFAULT_GEMINI_BASE_URL}).",
     )
     parser.add_argument(
         "--timeout",
@@ -78,6 +84,12 @@ def _resolve_model(args):
             raise SystemExit("--signals/--narrative are only supported with --provider=ollama.")
         if args.model == "llama3":
             raise SystemExit("When --provider=openai, pass --model explicitly.")
+        return args.model
+    if args.provider == "gemini":
+        if args.signals or args.narrative:
+            raise SystemExit("--signals/--narrative are only supported with --provider=ollama.")
+        if args.model == "llama3":
+            return "gemini-3.1-pro"
         return args.model
     if args.model != "llama3":
         return args.model
@@ -182,6 +194,7 @@ def main():
                     args.host,
                     args.timeout,
                     args.openai_base_url,
+                    args.gemini_base_url,
                 )
                 items, error = _parse_response(response_text)
                 if error:

@@ -15,7 +15,7 @@ from llm.extract_conversations import main as llm_conversations_main
 from llm.extract_entities import main as llm_entities_main
 from llm.extract_events import main as llm_events_main
 from llm.extract_identity_signals import main as llm_identity_signals_main
-from llm.provider_client import DEFAULT_OLLAMA_HOST, DEFAULT_OPENAI_BASE_URL
+from llm.provider_client import DEFAULT_GEMINI_BASE_URL, DEFAULT_OLLAMA_HOST, DEFAULT_OPENAI_BASE_URL
 from loaders.load_conversations import main as load_conversations_main
 from loaders.load_entities import main as load_entities_main
 from loaders.load_events import main as load_events_main
@@ -229,7 +229,7 @@ def run(
     llm_provider: str = typer.Option(
         "ollama",
         "--llm-provider",
-        help="LLM provider for the llm step: ollama or openai (default: ollama).",
+        help="LLM provider for the llm step: ollama, openai, or gemini (default: ollama).",
     ),
     llm_model: str = typer.Option(
         "llama3",
@@ -245,6 +245,11 @@ def run(
         DEFAULT_OPENAI_BASE_URL,
         "--llm-openai-base-url",
         help=f"OpenAI API base URL for --llm-provider=openai (default: {DEFAULT_OPENAI_BASE_URL}).",
+    ),
+    llm_gemini_base_url: str = typer.Option(
+        DEFAULT_GEMINI_BASE_URL,
+        "--llm-gemini-base-url",
+        help=f"Gemini API base URL for --llm-provider=gemini (default: {DEFAULT_GEMINI_BASE_URL}).",
     ),
     llm_timeout: int = typer.Option(
         120,
@@ -303,6 +308,8 @@ def run(
             str(llm_host),
             "--openai-base-url",
             str(llm_openai_base_url),
+            "--gemini-base-url",
+            str(llm_gemini_base_url),
             "--timeout",
             str(llm_timeout),
         ]

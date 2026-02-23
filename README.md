@@ -339,7 +339,23 @@ OPENAI_API_KEY=... PYTHONPATH=src python -m file_parser.cli run \
 - `.env` in current working directory
 - `.env` in repository root
 
-`.env` parsing uses `python-dotenv` (supports standard quoting and multiline values).
+Use Gemini for the `llm` step (instead of local Ollama):
+
+```bash
+GEMINI_API_KEY=... PYTHONPATH=src python -m file_parser.cli run \
+  --input /path/to/input \
+  --steps extract-text,chunk,llm,load \
+  --llm-provider gemini
+```
+
+Default Gemini model is `gemini-3.1-pro` (override with `--llm-model`).
+
+`GEMINI_API_KEY` lookup order for `--llm-provider gemini`:
+- process environment (`GEMINI_API_KEY`)
+- `.env` in current working directory
+- `.env` in repository root
+
+`.env` parsing uses `python-dotenv` when available; otherwise a simple KEY=VALUE parser is used.
 
 ## Phase 8: People entity resolution (dedupe)
 

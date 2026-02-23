@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from llm.provider_client import LLMProviderConfigError, _call_openai
+from llm.provider_client import LLMProviderConfigError, _call_gemini, _call_openai
 
 
 class _FakeResponse:
@@ -28,6 +28,17 @@ class LlmProviderClientTest(unittest.TestCase):
             with mock.patch("llm.provider_client._default_dotenv_candidates", return_value=[]):
                 with self.assertRaises(LLMProviderConfigError):
                     _call_openai("prompt", "gpt-4.1-mini", timeout=3, base_url="https://api.openai.com/v1")
+
+    def test_gemini_requires_api_key(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with mock.patch("llm.provider_client._default_dotenv_candidates", return_value=[]):
+                with self.assertRaises(LLMProviderConfigError):
+                    _call_gemini(
+                        "prompt",
+                        "gemini-3.1-pro",
+                        timeout=3,
+                        base_url="https://generativelanguage.googleapis.com/v1beta",
+                    )
 
     def test_openai_parses_string_content(self):
         captured = {}
@@ -62,6 +73,46 @@ class LlmProviderClientTest(unittest.TestCase):
         self.assertEqual(captured["auth"], "Bearer sk-test")
         self.assertEqual(captured["timeout"], 7)
 
+    def test_gemini_parses_parts_text(self):
+        captured = {}
+
+        def _fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["api_key"] = request.headers.get("X-goog-api-key") or request.headers.get("x-goog-api-key")
+            captured["timeout"] = timeout
+            return _FakeResponse(
+                {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {"text": '{"items":'},
+                                    {"text": "[]"},
+                                    {"text": "}"},
+                                ]
+                            }
+                        }
+                    ]
+                }
+            )
+
+        with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "gm-test"}):
+            with mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+                text = _call_gemini(
+                    "prompt",
+                    "gemini-3.1-pro",
+                    timeout=7,
+                    base_url="https://generativelanguage.googleapis.com/v1beta",
+                )
+
+        self.assertEqual(text, '{"items":[]}')
+        self.assertEqual(
+            captured["url"],
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro:generateContent",
+        )
+        self.assertEqual(captured["api_key"], "gm-test")
+        self.assertEqual(captured["timeout"], 7)
+
     def test_openai_parses_list_content(self):
         def _fake_urlopen(_request, timeout=None):
             _ = timeout
@@ -91,6 +142,37 @@ class LlmProviderClientTest(unittest.TestCase):
                 )
 
         self.assertEqual(text, '{"items":[]}')
+
+    def test_gemini_uses_dotenv_when_env_missing(self):
+        captured = {}
+
+        def _fake_urlopen(request, timeout):
+            captured["api_key"] = request.headers.get("X-goog-api-key") or request.headers.get("x-goog-api-key")
+            captured["timeout"] = timeout
+            return _FakeResponse({"candidates": [{"content": {"parts": [{"text": '{"items":[]}' }]}}]})
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dotenv_path = Path(tmpdir) / ".env"
+            dotenv_path.write_text("GEMINI_API_KEY=gm-from-dotenv\n", encoding="utf-8")
+            with mock.patch.dict(os.environ, {}, clear=True):
+                with mock.patch(
+                    "llm.provider_client._default_dotenv_candidates",
+                    return_value=[dotenv_path],
+                ):
+                    with mock.patch(
+                        "llm.provider_client.dotenv_values",
+                        return_value={"GEMINI_API_KEY": "gm-from-dotenv"},
+                    ):
+                        with mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+                            _call_gemini(
+                                "prompt",
+                                "gemini-3.1-pro",
+                                timeout=7,
+                                base_url="https://generativelanguage.googleapis.com/v1beta",
+                            )
+
+        self.assertEqual(captured["api_key"], "gm-from-dotenv")
+        self.assertEqual(captured["timeout"], 7)
 
     def test_openai_uses_dotenv_when_env_missing(self):
         captured = {}
