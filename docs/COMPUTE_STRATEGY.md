@@ -87,10 +87,10 @@ Use a deterministic weighted sum (or calibrated logistic) over features:
 
 Add knobs to prevent runaway cost:
 
-- [ ] Add `--max-llm-chunks` (cap total LLM calls).
-- [ ] Add `--max-llm-chunks-per-file`.
-- [ ] Add `--max-llm-tokens` (rough estimate via char/token heuristic).
-- [ ] Add `--llm-allowlist/--llm-denylist` (file_id or path glob inputs).
+- [x] Add `max_llm_chunks` (cap total LLM calls; CLI flag later).
+- [x] Add `max_llm_chunks_per_file` (CLI flag later).
+- [x] Add `max_llm_tokens` (rough estimate via char/token heuristic; CLI flag later).
+- [x] Add `allow_file_ids` / `deny_file_ids` budgets (CLI flag later).
 
 When budget is exceeded, remaining chunks are deterministically deprioritized by `(score, tie_breaker)` where `tie_breaker` is stable (e.g., `chunk_id`).
 
