@@ -15,6 +15,7 @@ from llm.extract_conversations import main as llm_conversations_main
 from llm.extract_entities import main as llm_entities_main
 from llm.extract_events import main as llm_events_main
 from llm.extract_identity_signals import main as llm_identity_signals_main
+from llm.provider_client import DEFAULT_OLLAMA_HOST, DEFAULT_OPENAI_BASE_URL
 from loaders.load_conversations import main as load_conversations_main
 from loaders.load_entities import main as load_entities_main
 from loaders.load_events import main as load_events_main
@@ -225,6 +226,31 @@ def run(
         "--steps",
         help="Comma-separated steps: extract-text,chunk,llm,load,resolve,timeline,thread,validate.",
     ),
+    llm_provider: str = typer.Option(
+        "ollama",
+        "--llm-provider",
+        help="LLM provider for the llm step: ollama or openai (default: ollama).",
+    ),
+    llm_model: str = typer.Option(
+        "llama3",
+        "--llm-model",
+        help="LLM model name for the llm step (default: llama3).",
+    ),
+    llm_host: str = typer.Option(
+        DEFAULT_OLLAMA_HOST,
+        "--llm-host",
+        help=f"Ollama host for --llm-provider=ollama (default: {DEFAULT_OLLAMA_HOST}).",
+    ),
+    llm_openai_base_url: str = typer.Option(
+        DEFAULT_OPENAI_BASE_URL,
+        "--llm-openai-base-url",
+        help=f"OpenAI API base URL for --llm-provider=openai (default: {DEFAULT_OPENAI_BASE_URL}).",
+    ),
+    llm_timeout: int = typer.Option(
+        120,
+        "--llm-timeout",
+        help="LLM request timeout in seconds for the llm step (default: 120).",
+    ),
     no_interactive: bool = typer.Option(
         False,
         "--no-interactive",
@@ -268,19 +294,31 @@ def run(
             phase4_main,
         )
     if "llm" in selected:
+        llm_common_args = [
+            "--provider",
+            str(llm_provider),
+            "--model",
+            str(llm_model),
+            "--host",
+            str(llm_host),
+            "--openai-base-url",
+            str(llm_openai_base_url),
+            "--timeout",
+            str(llm_timeout),
+        ]
         _dispatch_to_main(
             "llm entities",
-            ["--input", str(chunks_path), "--output", str(entities_path)],
+            ["--input", str(chunks_path), "--output", str(entities_path), *llm_common_args],
             llm_entities_main,
         )
         _dispatch_to_main(
             "llm events",
-            ["--input", str(chunks_path), "--output", str(events_path)],
+            ["--input", str(chunks_path), "--output", str(events_path), *llm_common_args],
             llm_events_main,
         )
         _dispatch_to_main(
             "llm conversations",
-            ["--input", str(chunks_path), "--output", str(conversations_path)],
+            ["--input", str(chunks_path), "--output", str(conversations_path), *llm_common_args],
             llm_conversations_main,
         )
     if "load" in selected:

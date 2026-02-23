@@ -324,6 +324,16 @@ You can still override steps explicitly:
 PYTHONPATH=src python -m file_parser.cli run --input /path/to/input --steps extract-text,chunk,llm,load
 ```
 
+Use OpenAI for the `llm` step (instead of local Ollama):
+
+```bash
+OPENAI_API_KEY=... PYTHONPATH=src python -m file_parser.cli run \
+  --input /path/to/input \
+  --steps extract-text,chunk,llm,load \
+  --llm-provider openai \
+  --llm-model gpt-4.1-mini
+```
+
 ## Phase 8: People entity resolution (dedupe)
 
 Phase 8 resolves person observations into canonical people and persists the results into the same SQLite DB.

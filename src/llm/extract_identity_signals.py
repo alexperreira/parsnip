@@ -2,7 +2,13 @@ import argparse
 import json
 import time
 import urllib.error
-import urllib.request
+
+from llm.provider_client import (
+    DEFAULT_OLLAMA_HOST,
+    DEFAULT_OPENAI_BASE_URL,
+    LLMProviderConfigError,
+    call_llm,
+)
 
 
 ALLOWED_ATTRIBUTES = {"dob", "address", "case_id"}
@@ -32,11 +38,22 @@ def _parse_args():
         action="store_true",
         help="Use narrative model defaults (qwen2.5:32b).",
     )
-    parser.add_argument("--model", default="llama3", help="Ollama model name.")
+    parser.add_argument(
+        "--provider",
+        choices=("ollama", "openai"),
+        default="ollama",
+        help="LLM provider (default: ollama).",
+    )
+    parser.add_argument("--model", default="llama3", help="LLM model name.")
     parser.add_argument(
         "--host",
-        default="http://localhost:11434",
-        help="Ollama host (default: http://localhost:11434).",
+        default=DEFAULT_OLLAMA_HOST,
+        help=f"Ollama host for --provider=ollama (default: {DEFAULT_OLLAMA_HOST}).",
+    )
+    parser.add_argument(
+        "--openai-base-url",
+        default=DEFAULT_OPENAI_BASE_URL,
+        help=f"OpenAI API base URL for --provider=openai (default: {DEFAULT_OPENAI_BASE_URL}).",
     )
     parser.add_argument(
         "--timeout",
@@ -56,6 +73,12 @@ def _parse_args():
 def _resolve_model(args):
     if args.signals and args.narrative:
         raise SystemExit("Choose only one of --signals or --narrative.")
+    if args.provider == "openai":
+        if args.signals or args.narrative:
+            raise SystemExit("--signals/--narrative are only supported with --provider=ollama.")
+        if args.model == "llama3":
+            raise SystemExit("When --provider=openai, pass --model explicitly.")
+        return args.model
     if args.model != "llama3":
         return args.model
     if args.signals:
@@ -77,22 +100,6 @@ def _build_prompt(text):
         "Quotes must be short, verbatim spans from the input.\n\n"
         f"INPUT:\n{text}"
     )
-
-
-def _call_ollama(prompt, model, host, timeout):
-    url = host.rstrip("/") + "/api/generate"
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "options": {"temperature": 0},
-    }
-    data = json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        body = response.read().decode("utf-8")
-    parsed = json.loads(body)
-    return parsed.get("response", "")
 
 
 def _parse_response(text):
@@ -168,17 +175,27 @@ def main():
             error = None
             items = []
             try:
-                response_text = _call_ollama(prompt, model, args.host, args.timeout)
+                response_text = call_llm(
+                    prompt,
+                    model,
+                    args.provider,
+                    args.host,
+                    args.timeout,
+                    args.openai_base_url,
+                )
                 items, error = _parse_response(response_text)
                 if error:
                     errors += 1
                     items = []
+            except LLMProviderConfigError:
+                errors += 1
+                error = f"{args.provider}_config_error"
             except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
                 errors += 1
-                error = "ollama_unavailable"
+                error = f"{args.provider}_unavailable"
             except Exception:
                 errors += 1
-                error = "ollama_error"
+                error = f"{args.provider}_error"
 
             output_record = {
                 "file_id": record.get("file_id"),
@@ -200,4 +217,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
