@@ -172,6 +172,81 @@ class TriagePhaseT1Test(unittest.TestCase):
                 Path(report_summary["llm_large_path"]).read_text(encoding="utf-8"),
             )
 
+    def test_build_triage_full_mode_still_applies_budgets(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            chunks_path = root / "chunks.jsonl"
+            out_dir = root / "out_full"
+            model_path = root / "route_model.pkl"
+
+            self._write_jsonl(
+                chunks_path,
+                [
+                    {
+                        "chunk_id": "a:0-0",
+                        "file_id": "a",
+                        "page_start": 0,
+                        "page_end": 0,
+                        "text": "warrant affidavit witness statement",
+                    },
+                    {
+                        "chunk_id": "a:1-1",
+                        "file_id": "a",
+                        "page_start": 1,
+                        "page_end": 1,
+                        "text": "incident timeline interview notes",
+                    },
+                ],
+            )
+
+            # Deterministic model that strongly prefers llm_small.
+            fake_model = {
+                "model_type": "multinomial_nb",
+                "classes": ["skip", "llm_small", "llm_large"],
+                "vocab": {},
+                "log_priors": {"skip": -10.0, "llm_small": 0.0, "llm_large": -10.0},
+                "log_unknown_probs": {"skip": -1.0, "llm_small": -1.0, "llm_large": -1.0},
+                "log_token_probs": {"skip": [], "llm_small": [], "llm_large": []},
+                "alpha": 1.0,
+                "token_regex": r"[A-Za-z0-9_]+",
+            }
+            with model_path.open("wb") as handle:
+                pickle.dump(fake_model, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+            summary = build_triage(
+                chunks_path=chunks_path,
+                output_dir=out_dir,
+                ml_route_mode="full",
+                ml_route_model_path=model_path,
+                max_llm_chunks=1,
+            )
+
+            self.assertTrue(summary["ml_model_loaded"])
+            self.assertEqual(summary["ml_route_mode"], "full")
+            self.assertEqual(summary["llm_selected_total"], 1)
+            self.assertEqual(summary["llm_budget_skipped_total"], 1)
+
+            triage_rows = [
+                json.loads(line)
+                for line in Path(summary["triage_path"]).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(triage_rows), 2)
+            self.assertTrue(all(row["ml_route"]["mode"] == "full" for row in triage_rows))
+            self.assertTrue(all(row["route"] in {"llm_small", "llm_large", "skip"} for row in triage_rows))
+
+            selected_small = [
+                json.loads(line)
+                for line in Path(summary["llm_small_path"]).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            selected_large = [
+                json.loads(line)
+                for line in Path(summary["llm_large_path"]).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(selected_small) + len(selected_large), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
