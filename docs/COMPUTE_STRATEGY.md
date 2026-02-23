@@ -43,11 +43,11 @@ These routes are implementation details, but the key is: **not all chunks go to 
 
 For each chunk:
 
-- **Text quality:** length, non-whitespace ratio, OCR artifacts (e.g., high punctuation rate), repeated characters, word-shape diversity.
-- **Structure hints:** dialogue markers, bullet density, table-ish patterns, presence of timestamps.
-- **Entity-ish hints (rules):** honorifics (`Mr.`, `Dr.`), capitalized-name sequences, initials, common org suffixes, badge/ID patterns.
-- **Event-ish hints (rules):** date patterns, time-of-day, “on/at/by” + date proximity, incident verbs (“arrested”, “interviewed”, “reported”).
-- **Domain keywords:** configurable keyword lists (case-specific + general).
+- [ ] Compute **text quality** features: length, non-whitespace ratio, OCR artifacts (e.g., high punctuation rate), repeated characters, word-shape diversity.
+- [ ] Compute **structure hint** features: dialogue markers, bullet density, table-ish patterns, presence of timestamps.
+- [ ] Compute **entity-ish hint** features (rules): honorifics (`Mr.`, `Dr.`), capitalized-name sequences, initials, common org suffixes, badge/ID patterns.
+- [ ] Compute **event-ish hint** features (rules): date patterns, time-of-day, “on/at/by” + date proximity, incident verbs (“arrested”, “interviewed”, “reported”).
+- [ ] Add **domain keyword** features with configurable keyword lists (case-specific + general).
 
 Output: a `features` object plus derived `score` and `reasons[]`.
 
@@ -55,20 +55,20 @@ Output: a `features` object plus derived `score` and `reasons[]`.
 
 ### 2A) Keyword filtering (always available)
 
-- Maintain curated keyword packs:
+- [ ] Maintain curated keyword packs:
   - `people_identity` (DOB, SSN, address, alias, etc.)
   - `events_timeline` (date, time, “responded”, “observed”, etc.)
   - `communications` (“text message”, “call”, “voicemail”, speaker tags)
   - `legal` (charges, statute, warrant, affidavit, etc.)
-- Support user-provided packs via a directory of `.txt` files.
-- Compile to case-insensitive regex with word boundaries where safe.
+- [ ] Support user-provided packs via a directory of `.txt` files.
+- [ ] Compile to case-insensitive regex with word boundaries where safe.
 
 ### 2B) NER filtering (only if installed; off by default)
 
 If a fast local NER library is available (e.g., spaCy), use it only to boost triage:
 
-- Entities counted by type (PERSON/ORG/GPE/DATE).
-- Only aggregate counts are persisted; raw spans are optional behind a flag.
+- [ ] Count entities by type (PERSON/ORG/GPE/DATE).
+- [ ] Persist only aggregate counts by default; gate raw spans behind an explicit flag.
 
 If NER is missing, triage still works via rule-based features.
 
@@ -87,10 +87,10 @@ Use a deterministic weighted sum (or calibrated logistic) over features:
 
 Add knobs to prevent runaway cost:
 
-- `--max-llm-chunks` (cap total LLM calls)
-- `--max-llm-chunks-per-file`
-- `--max-llm-tokens` (rough estimate via char/token heuristic)
-- `--llm-allowlist/--llm-denylist` (file_id or path glob inputs)
+- [ ] Add `--max-llm-chunks` (cap total LLM calls).
+- [ ] Add `--max-llm-chunks-per-file`.
+- [ ] Add `--max-llm-tokens` (rough estimate via char/token heuristic).
+- [ ] Add `--llm-allowlist/--llm-denylist` (file_id or path glob inputs).
 
 When budget is exceeded, remaining chunks are deterministically deprioritized by `(score, tie_breaker)` where `tie_breaker` is stable (e.g., `chunk_id`).
 
@@ -98,13 +98,13 @@ When budget is exceeded, remaining chunks are deterministically deprioritized by
 
 Update the LLM stage to accept a chunk stream to process (rather than assuming “all chunks”):
 
-- v1: emit `chunks.selected.jsonl` and point the existing LLM extractors at it.
-- v2: pass a `triage.jsonl` alongside `chunks.jsonl` and let the LLM stage internally select by `route`.
+- [ ] v1: emit `chunks.selected.jsonl` and point the existing LLM extractors at it.
+- [ ] v2: pass a `triage.jsonl` alongside `chunks.jsonl` and let the LLM stage internally select by `route`.
 
 For multi-model routing:
 
-- `llm_small` uses the faster/cheaper model for high-confidence “easy” chunks.
-- `llm_large` is reserved for:
+- [ ] Route `llm_small` to the faster/cheaper model for high-confidence “easy” chunks.
+- [ ] Reserve `llm_large` for:
   - low-quality but high-value chunks
   - complex narrative sections
   - chunks that failed `llm_small` (invalid JSON / refusal / empty extraction)
@@ -113,13 +113,13 @@ For multi-model routing:
 
 Cache key:
 
-- `chunk_text_hash`: hash of normalized chunk text (normalize whitespace + NFC + strip nulls)
-- plus `extractor_version` (prompt + schema + model + provider)
+- [ ] Add `chunk_text_hash`: hash of normalized chunk text (normalize whitespace + NFC + strip nulls).
+- [ ] Include `extractor_version` in the cache key (prompt + schema + model + provider).
 
 Store:
 
-- per-extractor output JSONL keyed by `(chunk_id, chunk_text_hash, extractor_version)`
-- “result status” so failed calls don’t retry endlessly without an operator override
+- [ ] Store per-extractor output JSONL keyed by `(chunk_id, chunk_text_hash, extractor_version)`.
+- [ ] Store “result status” so failed calls don’t retry endlessly without an operator override.
 
 This enables:
 
@@ -131,12 +131,12 @@ This enables:
 
 Prefer starting with a **classifier for routing**, not a full extractor:
 
-1) Collect training labels from:
+- [ ] Collect training labels from:
    - existing LLM outputs (yield vs empty)
    - operator “review” decisions
    - downstream resolver/timeline utility signals
-2) Train a lightweight model to predict `route` or “send_to_llm” probability.
-3) Keep a deterministic fallback and retain budget caps.
+- [ ] Train a lightweight model to predict `route` or “send_to_llm” probability.
+- [ ] Keep a deterministic fallback and retain budget caps.
 
 Only consider fine-tuning an extractor if:
 
@@ -167,38 +167,36 @@ These files contain the original chunk records, unchanged, but filtered by route
 
 Add Phase 7 metrics that make triage measurable:
 
-- `% chunks routed to LLM` and breakdown by route
-- yield per routed chunk (entities/events/conversations)
-- yield per 1k chunks scanned (end-to-end)
-- invalid JSON rate by route/model
-- time per stage (triage/llm/load/validate)
+- [ ] Report `% chunks routed to LLM` and breakdown by route.
+- [ ] Report yield per routed chunk (entities/events/conversations).
+- [ ] Report yield per 1k chunks scanned (end-to-end).
+- [ ] Report invalid JSON rate by route/model.
+- [ ] Report time per stage (triage/llm/load/validate).
 
 All metrics should be computable without storing raw chunk text in logs.
 
 ## CLI integration plan
 
-1) Add `fileparse triage` command:
-   - input: `output/text/chunks.jsonl`
-   - output: `output/triage.jsonl` (+ optional filtered chunk files)
-2) Add `triage` to `fileparse run --steps ...` between `chunk` and `llm`.
-3) Add `--triage-*` flags for thresholds, keyword packs, and budgets.
+- [ ] Add `fileparse triage` command (input: `output/text/chunks.jsonl`, output: `output/triage.jsonl` + optional filtered chunk files).
+- [ ] Add `triage` to `fileparse run --steps ...` between `chunk` and `llm`.
+- [ ] Add `--triage-*` flags for thresholds, keyword packs, and budgets.
 
 ## Test plan (deterministic, no LLM required)
 
-- Unit tests for:
+- [ ] Add unit tests for:
   - feature extraction (keyword hits, pattern detection)
   - scoring determinism + stable tie-breaks
   - budget cap behavior
   - `triage.jsonl` schema validation + redaction rules
-- Golden tests with a tiny synthetic `chunks.jsonl` fixture.
-- Integration test for `fileparse run --steps extract-text,chunk,triage` producing stable outputs.
+- [ ] Add golden tests with a tiny synthetic `chunks.jsonl` fixture.
+- [ ] Add an integration test for `fileparse run --steps extract-text,chunk,triage` producing stable outputs.
 
 ## Rollout sequence (minimize risk)
 
-1) **Report-only:** triage computes scores/routes but does not affect LLM selection; outputs metrics only.
-2) **Soft gating:** filter only the lowest-score tail (`skip`) with conservative thresholds.
-3) **Full routing:** enable `llm_small/llm_large` splits + budget caps; add caching.
-4) **Optional ML routing:** train and evaluate a routing classifier; keep deterministic fallback.
+- [ ] **Report-only:** triage computes scores/routes but does not affect LLM selection; outputs metrics only.
+- [ ] **Soft gating:** filter only the lowest-score tail (`skip`) with conservative thresholds.
+- [ ] **Full routing:** enable `llm_small/llm_large` splits + budget caps; add caching.
+- [ ] **Optional ML routing:** train and evaluate a routing classifier; keep deterministic fallback.
 
 ## Known edge cases (to design for)
 
@@ -206,4 +204,3 @@ All metrics should be computable without storing raw chunk text in logs.
 - OCR noise: strong pattern hits (dates/phones/addresses) must override low quality.
 - Tables/forms: often high value but low “narrative”; add table-ish heuristics.
 - Very short chunks: prefer per-file caps + allowlist rather than naive skipping.
-
