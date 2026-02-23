@@ -1,0 +1,326 @@
+import argparse
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, Tuple
+
+from file_parser.compress_io import open_text_reader, open_text_writer
+from llm.cache import chunk_text_hash
+
+
+def _parse_args():
+    parser = argparse.ArgumentParser(description="Build an ML routing dataset (route classification).")
+    parser.add_argument(
+        "--chunks",
+        default="output/text/chunks.jsonl",
+        help="Input chunks JSONL path (default: output/text/chunks.jsonl).",
+    )
+    parser.add_argument(
+        "--triage",
+        default="output/triage.jsonl",
+        help="Input triage JSONL path (default: output/triage.jsonl).",
+    )
+    parser.add_argument(
+        "--entities",
+        default="output/entities.jsonl",
+        help="Entities output JSONL path (default: output/entities.jsonl).",
+    )
+    parser.add_argument(
+        "--events",
+        default="output/events.jsonl",
+        help="Events output JSONL path (default: output/events.jsonl).",
+    )
+    parser.add_argument(
+        "--conversations",
+        default="output/conversations.jsonl",
+        help="Conversations output JSONL path (default: output/conversations.jsonl).",
+    )
+    parser.add_argument(
+        "--identity-signals",
+        default="output/identity_signals.jsonl",
+        help="Identity signals output JSONL path (default: output/identity_signals.jsonl).",
+    )
+    parser.add_argument(
+        "--output",
+        default="output/ml/route_dataset.jsonl",
+        help="Output dataset JSONL path (default: output/ml/route_dataset.jsonl).",
+    )
+    parser.add_argument(
+        "--labels",
+        default=None,
+        help="Optional human labels JSONL path (overrides heuristic labels).",
+    )
+    parser.add_argument(
+        "--skip-threshold",
+        type=float,
+        default=0.10,
+        help="Score threshold below which label_route defaults to skip when no yield is observed.",
+    )
+    parser.add_argument(
+        "--large-threshold",
+        type=float,
+        default=0.75,
+        help="Score threshold above which low-quality/no-yield chunks are labeled llm_large.",
+    )
+    parser.add_argument(
+        "--include-features",
+        action="store_true",
+        help="Include triage features in the dataset (recommended).",
+    )
+    parser.add_argument(
+        "--max-rows",
+        type=int,
+        default=None,
+        help="Optional max rows written.",
+    )
+    return parser.parse_args()
+
+
+def _iter_jsonl(path: Path) -> Iterator[Dict[str, Any]]:
+    with open_text_reader(path) as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict):
+                yield record
+
+
+def _as_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _is_low_quality_from_features(features: Mapping[str, Any]) -> bool:
+    tq = features.get("text_quality") or {}
+    char_len = _as_int(tq.get("char_len"))
+    non_ws_ratio = tq.get("non_ws_ratio")
+    punctuation_ratio = tq.get("punctuation_ratio")
+    max_repeat = _as_int(tq.get("max_repeated_char_run"))
+    if char_len and char_len < 40:
+        return True
+    if isinstance(non_ws_ratio, (int, float)) and non_ws_ratio < 0.05:
+        return True
+    if isinstance(punctuation_ratio, (int, float)) and punctuation_ratio > 0.40:
+        return True
+    if max_repeat >= 10:
+        return True
+    return False
+
+
+@dataclass(frozen=True)
+class LLMOutcome:
+    items_count: int
+    error: Optional[str]
+    model: Optional[str]
+
+    @property
+    def yield_nonempty(self) -> bool:
+        return self.error is None and self.items_count > 0
+
+
+def _load_llm_outcomes(path: Path) -> Dict[str, LLMOutcome]:
+    if not path.exists():
+        return {}
+    outcomes: Dict[str, LLMOutcome] = {}
+    for record in _iter_jsonl(path):
+        chunk_id = record.get("chunk_id")
+        if not isinstance(chunk_id, str) or not chunk_id:
+            continue
+        items = record.get("items")
+        items_count = len(items) if isinstance(items, list) else 0
+        error = record.get("error")
+        if error is not None and not isinstance(error, str):
+            error = str(error)
+        model = record.get("model")
+        if model is not None and not isinstance(model, str):
+            model = str(model)
+        outcomes[chunk_id] = LLMOutcome(items_count=items_count, error=error, model=model)
+    return outcomes
+
+
+def _load_human_labels(path: Optional[Path]) -> Dict[Tuple[str, str], Dict[str, Any]]:
+    if not path:
+        return {}
+    if not path.exists():
+        raise SystemExit(f"Labels not found: {path}")
+    labels: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for record in _iter_jsonl(path):
+        chunk_id = record.get("chunk_id")
+        text_hash = record.get("chunk_text_hash")
+        label_route = record.get("label_route")
+        if not isinstance(chunk_id, str) or not isinstance(text_hash, str) or not isinstance(label_route, str):
+            continue
+        labels[(chunk_id, text_hash)] = record
+    return labels
+
+
+def _label_route(
+    *,
+    triage_score: float,
+    any_yield: bool,
+    low_quality: bool,
+    skip_threshold: float,
+    large_threshold: float,
+) -> str:
+    if any_yield:
+        return "llm_small"
+    if triage_score < skip_threshold:
+        return "skip"
+    if low_quality and triage_score >= large_threshold:
+        return "llm_large"
+    return "llm_small"
+
+
+def build_route_dataset(
+    *,
+    chunks_path: Path,
+    triage_path: Path,
+    entities_path: Path,
+    events_path: Path,
+    conversations_path: Path,
+    identity_signals_path: Path,
+    output_path: Path,
+    labels_path: Optional[Path] = None,
+    skip_threshold: float = 0.10,
+    large_threshold: float = 0.75,
+    include_features: bool = True,
+    max_rows: Optional[int] = None,
+) -> Dict[str, Any]:
+    if not chunks_path.exists():
+        raise SystemExit(f"Chunks not found: {chunks_path}")
+    if not triage_path.exists():
+        raise SystemExit(f"Triage not found: {triage_path}")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    triage_by_chunk: Dict[str, Dict[str, Any]] = {}
+    for record in _iter_jsonl(triage_path):
+        chunk_id = record.get("chunk_id")
+        if isinstance(chunk_id, str) and chunk_id:
+            triage_by_chunk[chunk_id] = record
+
+    outcomes_entities = _load_llm_outcomes(entities_path)
+    outcomes_events = _load_llm_outcomes(events_path)
+    outcomes_conversations = _load_llm_outcomes(conversations_path)
+    outcomes_identity = _load_llm_outcomes(identity_signals_path)
+
+    human_labels = _load_human_labels(labels_path)
+
+    written = 0
+    missing_triage = 0
+    missing_ids = 0
+
+    with open_text_writer(output_path) as out_handle:
+        for chunk in _iter_jsonl(chunks_path):
+            if max_rows is not None and written >= max_rows:
+                break
+
+            chunk_id = chunk.get("chunk_id")
+            file_id = chunk.get("file_id")
+            if not isinstance(chunk_id, str) or not isinstance(file_id, str) or not chunk_id or not file_id:
+                missing_ids += 1
+                continue
+
+            triage = triage_by_chunk.get(chunk_id)
+            if not triage:
+                missing_triage += 1
+                continue
+
+            text = chunk.get("text") or ""
+            text_hash = chunk_text_hash(text)
+
+            features = triage.get("features") if isinstance(triage.get("features"), dict) else {}
+            triage_score = triage.get("score")
+            triage_score_val = float(triage_score) if isinstance(triage_score, (int, float)) else 0.0
+            low_quality = _is_low_quality_from_features(features)
+
+            ent = outcomes_entities.get(chunk_id) or LLMOutcome(0, None, None)
+            evt = outcomes_events.get(chunk_id) or LLMOutcome(0, None, None)
+            conv = outcomes_conversations.get(chunk_id) or LLMOutcome(0, None, None)
+            ident = outcomes_identity.get(chunk_id) or LLMOutcome(0, None, None)
+            any_yield = ent.yield_nonempty or evt.yield_nonempty or conv.yield_nonempty or ident.yield_nonempty
+
+            label_route = _label_route(
+                triage_score=triage_score_val,
+                any_yield=any_yield,
+                low_quality=low_quality,
+                skip_threshold=skip_threshold,
+                large_threshold=large_threshold,
+            )
+            label_source = "heuristic_from_yield"
+
+            override = human_labels.get((chunk_id, text_hash))
+            if override:
+                label_route = override.get("label_route", label_route)
+                label_source = override.get("label_source", "human")
+
+            row: Dict[str, Any] = {
+                "file_id": file_id,
+                "chunk_id": chunk_id,
+                "chunk_text_hash": text_hash,
+                "page_range": [chunk.get("page_start"), chunk.get("page_end")],
+                "text": text,
+                "triage": {
+                    "score": triage_score_val,
+                    "route": triage.get("route"),
+                    "token_est": triage.get("token_est"),
+                },
+                "labels": {
+                    "label_route": label_route,
+                    "label_source": label_source,
+                },
+                "outcomes": {
+                    "entities": {"items_count": ent.items_count, "error": ent.error, "model": ent.model},
+                    "events": {"items_count": evt.items_count, "error": evt.error, "model": evt.model},
+                    "conversations": {"items_count": conv.items_count, "error": conv.error, "model": conv.model},
+                    "identity_signals": {"items_count": ident.items_count, "error": ident.error, "model": ident.model},
+                },
+                "derived": {
+                    "any_yield": any_yield,
+                    "low_quality": low_quality,
+                },
+            }
+            if include_features:
+                row["features"] = features
+
+            out_handle.write(json.dumps(row, ensure_ascii=True) + "\n")
+            written += 1
+
+    return {
+        "rows_written": written,
+        "missing_triage": missing_triage,
+        "missing_ids": missing_ids,
+    }
+
+
+def main():
+    args = _parse_args()
+    summary = build_route_dataset(
+        chunks_path=Path(args.chunks),
+        triage_path=Path(args.triage),
+        entities_path=Path(args.entities),
+        events_path=Path(args.events),
+        conversations_path=Path(args.conversations),
+        identity_signals_path=Path(args.identity_signals),
+        output_path=Path(args.output),
+        labels_path=Path(args.labels) if args.labels else None,
+        skip_threshold=float(args.skip_threshold),
+        large_threshold=float(args.large_threshold),
+        include_features=bool(args.include_features),
+        max_rows=args.max_rows,
+    )
+    print("Route dataset summary")
+    for key in sorted(summary.keys()):
+        print(f"- {key}: {summary[key]}")
+
+
+if __name__ == "__main__":
+    main()
+

@@ -25,6 +25,7 @@ from text_extraction.phase3_extract_text import main as phase3_main
 from timeline.phase9_stitch_timeline import main as timeline_main
 from conversation_threading.phase10_thread_conversations import main as thread_main
 from triage.phase_t1_triage_chunks import main as triage_main
+from triage.build_route_dataset import main as route_dataset_main
 
 app = typer.Typer(
     add_completion=False,
@@ -200,6 +201,11 @@ def chunk(ctx: typer.Context):
 @app.command("triage", help="Run Phase T1 chunk triage (compute strategy routing).")
 def triage(ctx: typer.Context):
     _dispatch_to_main("triage", list(ctx.args), triage_main)
+
+
+@app.command("route-dataset", help="Build a route classification dataset from outputs.")
+def route_dataset(ctx: typer.Context):
+    _dispatch_to_main("route-dataset", list(ctx.args), route_dataset_main)
 
 
 @app.command("validate", help="Run Phase 7 sanity checks.")
