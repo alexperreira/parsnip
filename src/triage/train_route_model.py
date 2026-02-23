@@ -270,6 +270,38 @@ def _predict_proba(model: Dict[str, Any], text: str) -> Dict[str, float]:
     return {label: exp_scores[label] / total for label in OFFICIAL_ROUTE_LABELS}
 
 
+def load_route_model(path: Path) -> Dict[str, Any]:
+    with path.open("rb") as handle:
+        model = pickle.load(handle)
+    if not isinstance(model, dict):
+        raise ValueError("Route model artifact must be a dict.")
+    classes = model.get("classes")
+    if classes != list(OFFICIAL_ROUTE_LABELS):
+        raise ValueError("Route model classes are invalid or unsupported.")
+    vocab = model.get("vocab")
+    if not isinstance(vocab, dict):
+        raise ValueError("Route model vocabulary is missing.")
+    required_maps = ("log_priors", "log_unknown_probs", "log_token_probs")
+    for key in required_maps:
+        if not isinstance(model.get(key), dict):
+            raise ValueError(f"Route model field {key!r} is missing.")
+    for label in OFFICIAL_ROUTE_LABELS:
+        if label not in model["log_priors"]:
+            raise ValueError("Route model priors are incomplete.")
+        if label not in model["log_unknown_probs"]:
+            raise ValueError("Route model unknown-token probabilities are incomplete.")
+        token_probs = model["log_token_probs"].get(label)
+        if not isinstance(token_probs, list):
+            raise ValueError("Route model token probabilities are incomplete.")
+        if len(token_probs) != len(vocab):
+            raise ValueError("Route model token probability dimensions do not match vocabulary size.")
+    return model
+
+
+def predict_route_probabilities(model: Dict[str, Any], text: str) -> Dict[str, float]:
+    return _predict_proba(model, text)
+
+
 def _predict_label(probabilities: Dict[str, float]) -> str:
     best = OFFICIAL_ROUTE_LABELS[0]
     best_prob = probabilities.get(best, 0.0)
