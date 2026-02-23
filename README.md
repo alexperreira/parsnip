@@ -334,6 +334,13 @@ OPENAI_API_KEY=... PYTHONPATH=src python -m file_parser.cli run \
   --llm-model gpt-4.1-mini
 ```
 
+`OPENAI_API_KEY` lookup order for `--llm-provider openai`:
+- process environment (`OPENAI_API_KEY`)
+- `.env` in current working directory
+- `.env` in repository root
+
+`.env` parsing uses `python-dotenv` (supports standard quoting and multiline values).
+
 ## Phase 8: People entity resolution (dedupe)
 
 Phase 8 resolves person observations into canonical people and persists the results into the same SQLite DB.
