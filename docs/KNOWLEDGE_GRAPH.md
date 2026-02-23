@@ -60,6 +60,8 @@ Acceptance criteria should include:
 - [ ] Edge volumes (edges per person, per case, total edges).
   - Measure from SQLite once Stage 1 edge tables exist; set caps and indexing based on observed distributions.
   - Intentionally left unchecked until Stage 1 edge tables exist and we can measure real distributions.
+  - Measurement command: `PYTHONPATH=src python -m knowledge_graph.phase11_edge_volumes --db output/store.sqlite --json`
+  - After running on your target dataset, paste `edges_total`, `edges_per_person`, and `edges_per_case` here and check this box.
 - [x] Redaction policy for logs/summaries (no raw quotes by default).
   - Store evidence pointers; log only counts + hashed/redacted samples. Quotes remain opt-in.
 

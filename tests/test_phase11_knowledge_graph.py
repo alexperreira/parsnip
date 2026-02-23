@@ -8,6 +8,7 @@ from entity_resolution.phase8_resolve_people import build_resolve_people
 from file_parser.compress_io import open_text_reader
 from knowledge_graph.phase11_materialize_edges import build_materialize_edges
 from knowledge_graph.phase11_build_kg import build_export_kg
+from knowledge_graph.phase11_edge_volumes import compute_edge_volumes
 from knowledge_graph.phase12_graphdb_mirror import generate_neo4j_cypher
 from knowledge_graph.phase12_parity_checks import build_parity_checks
 from loaders.store import ensure_schema
@@ -264,6 +265,49 @@ class Phase11KnowledgeGraphTest(unittest.TestCase):
                 strict=True,
             )
             self.assertEqual(result["counts"]["diffs"], 0)
+
+    def test_phase11_edge_volume_summary(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            db_path = root / "store.sqlite"
+
+            conn = sqlite3.connect(db_path)
+            ensure_schema(conn, overwrite=True)
+            conn.execute(
+                "INSERT INTO entities(entity, type, confidence, file_id, chunk_id, page_start, page_end, quote) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                ("Alice", "person", 0.9, "f1", "c1", 1, 1, None),
+            )
+            cursor = conn.execute(
+                "INSERT INTO events(event, date, confidence, file_id, chunk_id, page_start, page_end, quote) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                ("Incident", "Jan 2024", 0.8, "f1", "c1", 1, 1, None),
+            )
+            event_id = int(cursor.lastrowid)
+            conn.execute(
+                "INSERT INTO identity_signals("
+                "person_text, attribute, value, value_norm, confidence, "
+                "file_id, chunk_id, page_start, page_end, quote"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("Alice", "case_id", "CASE 123", "CASE123", 0.7, "f1", "c1", 1, 1, "case id"),
+            )
+            conn.execute(
+                "INSERT INTO event_cases(event_id, case_id, case_id_norm, source) VALUES (?, ?, ?, ?)",
+                (event_id, "CASE 123", "CASE123", "identity_signals"),
+            )
+            conn.commit()
+            conn.close()
+
+            build_resolve_people(str(db_path), person_types="person", reset=True)
+            build_materialize_edges(str(db_path), reset=True)
+
+            summary = compute_edge_volumes(str(db_path))
+            self.assertGreaterEqual(summary.edges_total, 1)
+            self.assertGreaterEqual(summary.evidence_total, 1)
+            self.assertGreaterEqual(summary.people_with_edges, 1)
+            self.assertGreaterEqual(summary.cases_with_edges, 1)
+            self.assertIsNotNone(summary.edges_per_person.get("p50"))
+            self.assertIsNotNone(summary.edges_per_case.get("p50"))
 
 
 if __name__ == "__main__":
