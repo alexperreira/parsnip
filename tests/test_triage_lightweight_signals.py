@@ -1,6 +1,10 @@
 import unittest
 
+import tempfile
+from pathlib import Path
+
 from triage.lightweight_signals import compile_keyword_packs, compute_lightweight_signals
+from triage.lightweight_signals import load_keyword_packs_from_dir
 
 
 class TriageLightweightSignalsTest(unittest.TestCase):
@@ -65,6 +69,48 @@ class TriageLightweightSignalsTest(unittest.TestCase):
         self.assertEqual(domain["keyword_hit_by_pack"]["comms"], 2)
         self.assertEqual(domain["keyword_hit_by_pack"]["case"], 1)
 
+    def test_load_keyword_packs_from_dir(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "legal.txt").write_text(
+                "\n".join(
+                    [
+                        "# comment",
+                        "",
+                        "warrant",
+                        "affidavit",
+                        "  ",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (root / "comms.txt").write_text("text message\nvoicemail\n", encoding="utf-8")
+
+            packs = load_keyword_packs_from_dir(root)
+            self.assertEqual(set(packs.keys()), {"legal", "comms"})
+            self.assertEqual(packs["legal"], ["warrant", "affidavit"])
+
+            compiled = compile_keyword_packs(packs)
+            features = compute_lightweight_signals(
+                "Affidavit and warrant; voicemail left.",
+                compiled_keyword_packs=compiled,
+            )
+            domain = features["domain_keywords"]
+            self.assertEqual(domain["keyword_hit_by_pack"]["legal"], 2)
+            self.assertEqual(domain["keyword_hit_by_pack"]["comms"], 1)
+
+    def test_ner_is_fail_soft(self):
+        # Use an intentionally invalid model name so this is stable even if spaCy is installed.
+        features = compute_lightweight_signals(
+            "John Smith met Jane Doe on 2025-01-02.",
+            ner_enabled=True,
+            ner_model="__parsnip_no_such_spacy_model__",
+        )
+        ner = features["ner"]
+        self.assertIn("available", ner)
+        self.assertIn("counts_by_label", ner)
+        self.assertFalse(ner["available"])
+
     def test_non_string_inputs_are_safe(self):
         features = compute_lightweight_signals(None)
         self.assertEqual(features["text_quality"]["char_len"], 0)
@@ -73,4 +119,3 @@ class TriageLightweightSignalsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -1,6 +1,8 @@
 import re
+import tempfile
 import unicodedata
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Pattern, Sequence, Tuple
 
 
@@ -61,6 +63,60 @@ INCIDENT_VERB_RE = re.compile(
 )
 
 BULLET_LINE_RE = re.compile(r"^\s*(?:[-*•]|(?:\d{1,3}[.)]))\s+\S")
+
+DEFAULT_KEYWORD_PACKS: Dict[str, List[str]] = {
+    "people_identity": [
+        "date of birth",
+        "dob",
+        "ssn",
+        "social security",
+        "address",
+        "alias",
+        "aka",
+        "maiden name",
+        "driver license",
+        "dl",
+        "passport",
+        "phone",
+        "email",
+    ],
+    "events_timeline": [
+        "on",
+        "at",
+        "by",
+        "reported",
+        "responded",
+        "arrived",
+        "departed",
+        "observed",
+        "interview",
+        "statement",
+        "timeline",
+    ],
+    "communications": [
+        "text message",
+        "sms",
+        "call",
+        "phone call",
+        "voicemail",
+        "email",
+        "chat",
+        "message",
+    ],
+    "legal": [
+        "charge",
+        "charges",
+        "statute",
+        "warrant",
+        "affidavit",
+        "probable cause",
+        "complaint",
+        "indictment",
+        "plea",
+        "sentencing",
+        "subpoena",
+    ],
+}
 
 
 def _safe_text(text: Any) -> str:
@@ -160,6 +216,48 @@ def compile_keyword_packs(
     return compiled
 
 
+def load_keyword_packs_from_dir(
+    packs_dir: Any,
+    *,
+    max_packs: int = 100,
+    max_keywords_per_pack: int = 5000,
+    max_keyword_len: int = 200,
+) -> Dict[str, List[str]]:
+    """
+    Load keyword packs from a directory of .txt files.
+
+    Each file name (without extension) becomes the pack name, and each non-empty, non-comment line
+    becomes a keyword. Lines beginning with '#' are treated as comments.
+    """
+    path = Path(_safe_text(packs_dir))
+    if not path.exists() or not path.is_dir():
+        raise SystemExit(f"Keyword packs dir not found: {path}")
+
+    packs: Dict[str, List[str]] = {}
+    pack_files = sorted(p for p in path.glob("*.txt") if p.is_file())[:max_packs]
+    for pack_file in pack_files:
+        pack_name = pack_file.stem.strip()
+        if not pack_name:
+            continue
+        keywords: List[str] = []
+        try:
+            raw_text = pack_file.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for raw_line in raw_text.splitlines():
+            if len(keywords) >= max_keywords_per_pack:
+                break
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if len(line) > max_keyword_len:
+                continue
+            keywords.append(line)
+        if keywords:
+            packs[pack_name] = keywords
+    return packs
+
+
 @dataclass(frozen=True)
 class KeywordHitSummary:
     total: int
@@ -187,6 +285,9 @@ def compute_lightweight_signals(
     text: Any,
     *,
     compiled_keyword_packs: Optional[Mapping[str, Sequence[Pattern[str]]]] = None,
+    ner_enabled: bool = False,
+    ner_model: str = "en_core_web_sm",
+    ner_include_spans: bool = False,
 ) -> Dict[str, Any]:
     text = _truncate_for_analysis(_safe_text(text))
     total_chars = len(text)
@@ -240,6 +341,14 @@ def compute_lightweight_signals(
 
     keyword_summary = _keyword_hits(text, compiled_keyword_packs or {})
 
+    ner: Optional[Dict[str, Any]] = None
+    if ner_enabled:
+        ner = compute_ner_counts(
+            text,
+            model_name=ner_model,
+            include_spans=ner_include_spans,
+        )
+
     features: Dict[str, Any] = {
         "text_quality": {
             "char_len": total_chars,
@@ -283,5 +392,54 @@ def compute_lightweight_signals(
             "keyword_hit_by_pack": keyword_summary.by_pack,
         }
 
+    if ner is not None:
+        features["ner"] = ner
+
     return features
 
+
+def compute_ner_counts(
+    text: Any,
+    *,
+    model_name: str = "en_core_web_sm",
+    include_spans: bool = False,
+) -> Dict[str, Any]:
+    """
+    Optional, local NER (spaCy) to support triage scoring.
+
+    - Off by default (caller-controlled).
+    - Fail-soft: if spaCy/model unavailable, returns available=False and an error code.
+    - By default, persists only aggregate counts. Spans are gated behind include_spans.
+    """
+    text = _truncate_for_analysis(_safe_text(text))
+    try:
+        import spacy  # type: ignore
+    except Exception:
+        return {"available": False, "error": "missing_spacy", "counts_by_label": {}}
+
+    try:
+        nlp = spacy.load(model_name)
+    except Exception:
+        return {"available": False, "error": "model_load_failed", "counts_by_label": {}}
+
+    doc = nlp(text)
+    counts: Dict[str, int] = {}
+    spans: List[Dict[str, Any]] = []
+    for ent in getattr(doc, "ents", []) or []:
+        label = getattr(ent, "label_", None)
+        if not label:
+            continue
+        counts[label] = counts.get(label, 0) + 1
+        if include_spans:
+            start_char = getattr(ent, "start_char", None)
+            end_char = getattr(ent, "end_char", None)
+            spans.append({"label": label, "start_char": start_char, "end_char": end_char})
+
+    payload: Dict[str, Any] = {
+        "available": True,
+        "error": None,
+        "counts_by_label": counts,
+    }
+    if include_spans:
+        payload["spans"] = spans
+    return payload

@@ -55,20 +55,20 @@ Output: a `features` object plus derived `score` and `reasons[]`.
 
 ### 2A) Keyword filtering (always available)
 
-- [ ] Maintain curated keyword packs:
+- [x] Maintain curated keyword packs:
   - `people_identity` (DOB, SSN, address, alias, etc.)
   - `events_timeline` (date, time, “responded”, “observed”, etc.)
   - `communications` (“text message”, “call”, “voicemail”, speaker tags)
   - `legal` (charges, statute, warrant, affidavit, etc.)
-- [ ] Support user-provided packs via a directory of `.txt` files.
-- [ ] Compile to case-insensitive regex with word boundaries where safe.
+- [x] Support user-provided packs via a directory of `.txt` files.
+- [x] Compile to case-insensitive regex with word boundaries where safe.
 
 ### 2B) NER filtering (only if installed; off by default)
 
 If a fast local NER library is available (e.g., spaCy), use it only to boost triage:
 
-- [ ] Count entities by type (PERSON/ORG/GPE/DATE).
-- [ ] Persist only aggregate counts by default; gate raw spans behind an explicit flag.
+- [x] Count entities by type (PERSON/ORG/GPE/DATE).
+- [x] Persist only aggregate counts by default; gate raw spans behind an explicit flag.
 
 If NER is missing, triage still works via rule-based features.
 
