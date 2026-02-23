@@ -9,7 +9,7 @@ Move relationship exploration from ad-hoc SQLite joins to a **graph-shaped store
 queries across **people**, **events**, and **cases** while preserving Parsnip’s core invariants:
 
 - **Deterministic + idempotent** builds (reruns converge on the same graph).
-- **Auditable evidence pointers** on every relationship (file/chunk/page/quote + extractor version).
+- **Auditable evidence pointers** on every relationship (file/chunk/page + source/extractor version; quote lookup is on-demand).
 - **Fail-soft** behavior (bad records don’t crash a build; errors are summarized).
 
 Storage staging must follow `docs/GRAPH_DB_DECISION.md`:
@@ -111,9 +111,9 @@ Optional enrichment edges (only if they improve query quality):
 - `Event -[:MENTIONED_IN_THREAD]-> ConversationThread` (from shared `file_id/chunk_id` signals)
 - `Person -[:CO_OCCURS_WITH]-> Person` (materialized view, not canonical, if traversal is too slow)
 
-Evidence pointer fields (required on every edge):
+Evidence pointer fields (required on every edge evidence row):
 
-- `file_id`, `chunk_id`, `page_start`, `page_end`, `quote` (quote optional/off by default)
+- `file_id`, `chunk_id`, `page_start`, `page_end`
 - `confidence`, `source_phase`, `extractor_version`, `created_utc`
 
 Edge identity (deterministic):
@@ -161,7 +161,8 @@ Phase B entry point:
 Notes:
 
 - Prefer recording multiple evidence rows per logical edge (many-to-one) rather than collapsing evidence.
-- Keep raw text/quotes out of logs by default; store quotes only when necessary for explainability.
+- Keep raw text/quotes out of logs by default; `kg_edge_evidence` remains pointer-only.
+- For explainability UIs, resolve quote snippets on-demand from source extraction tables using evidence pointers.
 
 ### Phase C — Build deterministic exports (“graph projection”)
 
@@ -230,8 +231,19 @@ Phase E entry point (one-shot publish artifacts):
 - [x] **Data leakage** (quotes/paths): store evidence pointers, but redact/truncate in logs and summaries.
   - CLIs print counts/top-k summaries only; `phase12_parity_checks` redacts case/person keys in diff samples.
 
-## Open questions (to resolve before Phase D)
+## Resolved Phase D decisions
 
-- [ ] Which 2–3 traversal queries are truly “core” and need interactive performance?
-- [ ] Expected edge volumes by type at the target scale (e.g., edges/person/case).
-- [ ] Evidence retention policy: do we store quotes for every edge, or only evidence IDs + “show on demand”?
+- [x] **Core interactive traversal queries (first-class for Stage 3):**
+  - `case_overview`
+  - `person_profile`
+  - `person_traversal_2hop_via_case`
+  - `event_storyline` remains required, but can be served via ordered case-scoped retrieval if 2-hop traversal latency is prioritized first.
+- [x] **Expected edge volumes by type at target scale (defined as measurable contracts, not guessed constants):**
+  - `Event -[:IN_CASE]-> Case` volume tracks `event_cases` cardinality (one logical edge per `(event_id, case_id_norm)` pair).
+  - `Person -[:IN_CASE]-> Case` volume tracks distinct resolved `(person_id, case_id_norm)` pairs derived from `identity_signals`.
+  - `Person -[:MENTIONED_IN_EVENT]-> Event` is the dominant/high-risk edge type and scales with per-chunk co-occurrence cross-products; apply deterministic fanout caps where needed (`--max-people-per-chunk`, `--max-events-per-chunk`).
+  - Phase D readiness requires recording real distributions from representative corpora in `phase13_publish_graph` manifest + `phase11_edge_volumes` output (`edges_total`, top edge types, `edges_per_person` p50/p90/p99/max, `edges_per_case` p50/p90/p99/max).
+- [x] **Evidence retention policy: pointer-first with on-demand quote retrieval.**
+  - Default storage for graph relationships is `kg_edge_evidence` pointers/metadata only (no quote blob duplication).
+  - Default logs/exports/query summaries remain quote-free/redacted.
+  - Quote display is opt-in at read time by dereferencing evidence pointers to source rows.
