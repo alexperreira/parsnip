@@ -1,4 +1,6 @@
+import json
 import sys
+import time
 from pathlib import Path
 
 import typer
@@ -26,6 +28,7 @@ from timeline.phase9_stitch_timeline import main as timeline_main
 from conversation_threading.phase10_thread_conversations import main as thread_main
 from triage.phase_t1_triage_chunks import main as triage_main
 from triage.build_route_dataset import main as route_dataset_main
+from triage.train_route_model import main as route_train_main
 
 app = typer.Typer(
     add_completion=False,
@@ -208,6 +211,11 @@ def route_dataset(ctx: typer.Context):
     _dispatch_to_main("route-dataset", list(ctx.args), route_dataset_main)
 
 
+@app.command("route-train", help="Train a baseline route classifier from route_dataset.jsonl.")
+def route_train(ctx: typer.Context):
+    _dispatch_to_main("route-train", list(ctx.args), route_train_main)
+
+
 @app.command("validate", help="Run Phase 7 sanity checks.")
 def validate(ctx: typer.Context):
     _dispatch_to_main("validate", list(ctx.args), phase7_main)
@@ -327,16 +335,28 @@ def run(
     _ = ctx, no_interactive
     selected = [step.strip() for step in steps.split(",") if step.strip()]
     output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
     text_output_dir = output_path / "text"
     chunks_path = text_output_dir / "chunks.jsonl"
+    triage_path = output_path / "triage.jsonl"
     triage_small_chunks_path = output_path / "chunks.llm_small.jsonl"
     triage_large_chunks_path = output_path / "chunks.llm_large.jsonl"
+    stage_timings_path = output_path / "stage_timings.json"
+    stage_timings_ms = {}
     entities_path = output_path / "entities.jsonl"
     events_path = output_path / "events.jsonl"
     conversations_path = output_path / "conversations.jsonl"
     db_path = output_path / "store.sqlite"
 
+    def _record_stage_timing(stage_name: str, started: float):
+        stage_timings_ms[stage_name] = int(round((time.monotonic() - started) * 1000))
+        stage_timings_path.write_text(
+            json.dumps({"timings_ms": stage_timings_ms}, ensure_ascii=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
     if "extract-text" in selected:
+        stage_started = time.monotonic()
         _dispatch_to_main(
             "extract-text",
             [
@@ -351,7 +371,9 @@ def run(
             ],
             phase3_main,
         )
+        _record_stage_timing("extract-text", stage_started)
     if "chunk" in selected:
+        stage_started = time.monotonic()
         _dispatch_to_main(
             "chunk",
             [
@@ -362,7 +384,9 @@ def run(
             ],
             phase4_main,
         )
+        _record_stage_timing("chunk", stage_started)
     if "triage" in selected:
+        stage_started = time.monotonic()
         triage_args = [
             "--input",
             str(chunks_path),
@@ -393,7 +417,9 @@ def run(
             triage_args.append("--ner")
             triage_args.extend(["--ner-model", str(triage_ner_model)])
         _dispatch_to_main("triage", triage_args, triage_main)
+        _record_stage_timing("triage", stage_started)
     if "llm" in selected:
+        stage_started = time.monotonic()
         llm_common_args = [
             "--provider",
             str(llm_provider),
@@ -426,7 +452,9 @@ def run(
             ["--input", str(llm_chunks_path), "--output", str(conversations_path), *llm_common_args],
             llm_conversations_main,
         )
+        _record_stage_timing("llm", stage_started)
     if "load" in selected:
+        stage_started = time.monotonic()
         _run_load_stage(
             entities_path,
             events_path,
@@ -434,13 +462,17 @@ def run(
             db_path,
             overwrite=False,
         )
+        _record_stage_timing("load", stage_started)
     if "resolve" in selected:
+        stage_started = time.monotonic()
         _dispatch_to_main(
             "resolve",
             ["--db", str(db_path), "--reset"],
             resolve_people_main,
         )
+        _record_stage_timing("resolve", stage_started)
     if "timeline" in selected:
+        stage_started = time.monotonic()
         timeline_args = ["--db", str(db_path)]
         if chunks_path.exists():
             timeline_args.extend(["--chunks", str(chunks_path)])
@@ -448,7 +480,9 @@ def run(
         if manifest_path.exists():
             timeline_args.extend(["--manifest", str(manifest_path)])
         _dispatch_to_main("timeline", timeline_args, timeline_main)
+        _record_stage_timing("timeline", stage_started)
     if "thread" in selected:
+        stage_started = time.monotonic()
         thread_args = ["--db", str(db_path)]
         if chunks_path.exists():
             thread_args.extend(["--chunks", str(chunks_path)])
@@ -456,23 +490,31 @@ def run(
         if manifest_path.exists():
             thread_args.extend(["--manifest", str(manifest_path)])
         _dispatch_to_main("thread", thread_args, thread_main)
+        _record_stage_timing("thread", stage_started)
     if "validate" in selected:
+        stage_started = time.monotonic()
+        validate_args = [
+            "--chunks",
+            str(chunks_path),
+            "--entities",
+            str(entities_path),
+            "--events",
+            str(events_path),
+            "--conversations",
+            str(conversations_path),
+            "--phase3",
+            str(text_output_dir),
+        ]
+        if triage_path.exists():
+            validate_args.extend(["--triage", str(triage_path)])
+        if stage_timings_path.exists():
+            validate_args.extend(["--timings", str(stage_timings_path)])
         _dispatch_to_main(
             "validate",
-            [
-                "--chunks",
-                str(chunks_path),
-                "--entities",
-                str(entities_path),
-                "--events",
-                str(events_path),
-                "--conversations",
-                str(conversations_path),
-                "--phase3",
-                str(text_output_dir),
-            ],
+            validate_args,
             phase7_main,
         )
+        _record_stage_timing("validate", stage_started)
 
 
 def main():
