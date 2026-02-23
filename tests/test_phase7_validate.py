@@ -81,9 +81,24 @@ class Phase7ValidateTest(unittest.TestCase):
             self._write_jsonl(
                 triage_path,
                 [
-                    {"chunk_id": "a:0-0", "route": "llm_small"},
-                    {"chunk_id": "a:1-1", "route": "skip"},
-                    {"chunk_id": "b:0-0", "route": "llm_large"},
+                    {
+                        "chunk_id": "a:0-0",
+                        "route": "llm_small",
+                        "token_est": 50,
+                        "ml_route": {"predicted_route": "llm_small"},
+                    },
+                    {
+                        "chunk_id": "a:1-1",
+                        "route": "skip",
+                        "token_est": 10,
+                        "ml_route": {"predicted_route": "llm_large"},
+                    },
+                    {
+                        "chunk_id": "b:0-0",
+                        "route": "llm_large",
+                        "token_est": 40,
+                        "ml_route": {"predicted_route": "skip"},
+                    },
                 ],
             )
             timings_path.write_text(
@@ -144,17 +159,41 @@ class Phase7ValidateTest(unittest.TestCase):
             self.assertEqual(summary["triage_routing"]["triage_records"], 3)
             self.assertEqual(summary["triage_routing"]["routed_to_llm_chunks"], 2)
             self.assertEqual(summary["triage_routing"]["routed_to_llm_pct"], 66.667)
+            self.assertEqual(summary["triage_routing"]["routed_to_llm_tokens_est"], 90)
+            self.assertEqual(summary["triage_routing"]["predicted_routed_to_llm_chunks"], 2)
+            self.assertEqual(summary["triage_routing"]["predicted_routed_to_llm_pct"], 66.667)
+            self.assertEqual(summary["triage_routing"]["predicted_routed_to_llm_tokens_est"], 60)
             self.assertEqual(summary["triage_routing"]["route_breakdown"]["llm_small"]["count"], 1)
+            self.assertEqual(summary["triage_routing"]["route_breakdown"]["llm_small"]["tokens_est"], 50)
             self.assertEqual(summary["triage_routing"]["route_breakdown"]["skip"]["count"], 1)
+            self.assertEqual(summary["triage_routing"]["route_breakdown"]["skip"]["tokens_est"], 10)
+            self.assertEqual(summary["triage_routing"]["predicted_route_breakdown"]["llm_large"]["count"], 1)
+            self.assertEqual(summary["triage_routing"]["predicted_route_breakdown"]["llm_large"]["tokens_est"], 10)
             self.assertEqual(summary["llm_yield_by_extractor"]["entities"]["routed_to_llm"]["records"], 2)
             self.assertEqual(summary["llm_yield_by_extractor"]["entities"]["routed_to_llm"]["records_with_items"], 1)
             self.assertEqual(summary["llm_yield_by_extractor"]["entities"]["routed_to_llm"]["yield_pct"], 50.0)
+            self.assertEqual(summary["llm_yield_by_extractor"]["entities"]["predicted_routed_to_llm"]["records"], 2)
+            self.assertEqual(summary["llm_yield_by_extractor"]["entities"]["predicted_routed_to_llm"]["yield_pct"], 50.0)
+            self.assertEqual(
+                summary["llm_yield_by_extractor"]["entities"]["by_predicted_route"]["skip"]["records_with_error"],
+                1,
+            )
+            self.assertEqual(
+                summary["llm_yield_by_extractor"]["entities"]["by_predicted_route"]["skip"]["error_rate_pct"],
+                100.0,
+            )
             self.assertEqual(
                 summary["llm_invalid_json_by_route_model"]["llm_large"]["large-v1"]["invalid_json_records"], 1
             )
             self.assertEqual(
                 summary["llm_invalid_json_by_route_model"]["llm_small"]["small-v1"]["invalid_json_records"], 1
             )
+            self.assertEqual(summary["llm_yield_error_by_predicted_route"]["llm_small"]["records"], 3)
+            self.assertEqual(summary["llm_yield_error_by_predicted_route"]["llm_small"]["records_with_items"], 1)
+            self.assertEqual(summary["llm_yield_error_by_predicted_route"]["llm_small"]["records_with_error"], 1)
+            self.assertEqual(summary["llm_yield_error_by_predicted_route"]["llm_small"]["yield_pct"], 33.333)
+            self.assertEqual(summary["llm_yield_error_by_predicted_route"]["llm_small"]["error_rate_pct"], 33.333)
+            self.assertEqual(summary["llm_yield_error_by_predicted_route"]["skip"]["error_rate_pct"], 50.0)
             self.assertEqual(summary["yield_per_1k_chunks"]["entities"], 666.667)
             self.assertEqual(summary["yield_per_1k_chunks"]["events"], 333.333)
             self.assertEqual(summary["yield_per_1k_chunks"]["any_extractor"], 666.667)

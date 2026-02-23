@@ -16,6 +16,13 @@ def _safe_pct(numerator, denominator):
     return round((numerator / denominator) * 100.0, 3)
 
 
+def _as_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _iter_jsonl(path):
     with open_text_reader(path) as handle:
         for line in handle:
@@ -126,18 +133,29 @@ def _load_triage_routes(triage_path):
     if triage_path is None:
         return {
             "route_by_chunk_id": {},
+            "predicted_route_by_chunk_id": {},
+            "token_est_by_chunk_id": {},
             "triage_records": 0,
             "json_decode_errors": 0,
             "route_counts": {},
+            "predicted_route_counts": {},
+            "routed_to_llm_tokens_est": 0,
+            "predicted_routed_to_llm_tokens_est": 0,
         }
     path = Path(triage_path)
     if not path.exists():
         raise SystemExit(f"Required input is missing: {path}")
 
     route_by_chunk_id = {}
+    predicted_route_by_chunk_id = {}
+    token_est_by_chunk_id = {}
     route_counts = {}
+    predicted_route_counts = {}
     triage_records = 0
     json_decode_errors = 0
+    routed_to_llm_tokens_est = 0
+    predicted_routed_to_llm_tokens_est = 0
+    llm_routes = {"llm_small", "llm_large"}
     for record, error in _iter_jsonl(path):
         if error:
             json_decode_errors += 1
@@ -148,30 +166,61 @@ def _load_triage_routes(triage_path):
         route = record.get("route")
         route_name = route if isinstance(route, str) and route else "unknown"
         route_counts[route_name] = route_counts.get(route_name, 0) + 1
+        token_est = _as_int(record.get("token_est"))
+        if route_name in llm_routes:
+            routed_to_llm_tokens_est += token_est
+
+        ml_route = record.get("ml_route")
+        predicted_route_name = route_name
+        if isinstance(ml_route, dict):
+            predicted_route = ml_route.get("predicted_route")
+            if isinstance(predicted_route, str) and predicted_route:
+                predicted_route_name = predicted_route
+        predicted_route_counts[predicted_route_name] = (
+            predicted_route_counts.get(predicted_route_name, 0) + 1
+        )
+        if predicted_route_name in llm_routes:
+            predicted_routed_to_llm_tokens_est += token_est
+
         chunk_id = record.get("chunk_id")
         if isinstance(chunk_id, str) and chunk_id:
             route_by_chunk_id[chunk_id] = route_name
+            predicted_route_by_chunk_id[chunk_id] = predicted_route_name
+            token_est_by_chunk_id[chunk_id] = token_est
 
     return {
         "route_by_chunk_id": route_by_chunk_id,
+        "predicted_route_by_chunk_id": predicted_route_by_chunk_id,
+        "token_est_by_chunk_id": token_est_by_chunk_id,
         "triage_records": triage_records,
         "json_decode_errors": json_decode_errors,
         "route_counts": route_counts,
+        "predicted_route_counts": predicted_route_counts,
+        "routed_to_llm_tokens_est": routed_to_llm_tokens_est,
+        "predicted_routed_to_llm_tokens_est": predicted_routed_to_llm_tokens_est,
     }
 
 
-def _count_llm_route_metrics(paths_by_extractor, route_by_chunk_id):
+def _count_llm_route_metrics(paths_by_extractor, route_by_chunk_id, predicted_route_by_chunk_id=None):
     route_by_chunk_id = route_by_chunk_id or {}
+    predicted_route_by_chunk_id = predicted_route_by_chunk_id or {}
     llm_routes = {"llm_small", "llm_large"}
     per_extractor = {}
     invalid_json_by_route_model = {}
     yielded_chunk_ids = set()
+    predicted_route_totals_global = {}
+    predicted_route_with_items_global = {}
+    predicted_route_errors_global = {}
 
     for extractor, path in paths_by_extractor.items():
         records = 0
         records_with_items = 0
         route_totals = {}
         route_with_items = {}
+        route_with_error = {}
+        predicted_route_totals = {}
+        predicted_route_with_items = {}
+        predicted_route_with_error = {}
 
         for record, error in _iter_jsonl(path):
             if error or not isinstance(record, dict):
@@ -179,17 +228,41 @@ def _count_llm_route_metrics(paths_by_extractor, route_by_chunk_id):
             records += 1
             chunk_id = record.get("chunk_id")
             route = "unknown"
+            predicted_route = "unknown"
             if isinstance(chunk_id, str) and chunk_id:
                 route = route_by_chunk_id.get(chunk_id, "unknown")
+                predicted_route = predicted_route_by_chunk_id.get(chunk_id, route)
             route_totals[route] = route_totals.get(route, 0) + 1
+            predicted_route_totals[predicted_route] = (
+                predicted_route_totals.get(predicted_route, 0) + 1
+            )
+            predicted_route_totals_global[predicted_route] = (
+                predicted_route_totals_global.get(predicted_route, 0) + 1
+            )
 
             items = record.get("items")
             has_items = isinstance(items, list) and len(items) > 0 and record.get("error") is None
             if has_items:
                 records_with_items += 1
                 route_with_items[route] = route_with_items.get(route, 0) + 1
+                predicted_route_with_items[predicted_route] = (
+                    predicted_route_with_items.get(predicted_route, 0) + 1
+                )
+                predicted_route_with_items_global[predicted_route] = (
+                    predicted_route_with_items_global.get(predicted_route, 0) + 1
+                )
                 if isinstance(chunk_id, str) and chunk_id:
                     yielded_chunk_ids.add(chunk_id)
+
+            has_error = isinstance(record.get("error"), str) and bool(record.get("error"))
+            if has_error:
+                route_with_error[route] = route_with_error.get(route, 0) + 1
+                predicted_route_with_error[predicted_route] = (
+                    predicted_route_with_error.get(predicted_route, 0) + 1
+                )
+                predicted_route_errors_global[predicted_route] = (
+                    predicted_route_errors_global.get(predicted_route, 0) + 1
+                )
 
             model = record.get("model")
             model_name = model if isinstance(model, str) and model else "unknown"
@@ -207,10 +280,33 @@ def _count_llm_route_metrics(paths_by_extractor, route_by_chunk_id):
                 "records": route_records,
                 "records_with_items": route_yield,
                 "yield_pct": _safe_pct(route_yield, route_records),
+                "records_with_error": route_with_error.get(route_name, 0),
+                "error_rate_pct": _safe_pct(route_with_error.get(route_name, 0), route_records),
+            }
+
+        by_predicted_route = {}
+        for route_name in sorted(predicted_route_totals.keys()):
+            route_records = predicted_route_totals[route_name]
+            route_yield = predicted_route_with_items.get(route_name, 0)
+            route_errors = predicted_route_with_error.get(route_name, 0)
+            by_predicted_route[route_name] = {
+                "records": route_records,
+                "records_with_items": route_yield,
+                "yield_pct": _safe_pct(route_yield, route_records),
+                "records_with_error": route_errors,
+                "error_rate_pct": _safe_pct(route_errors, route_records),
             }
 
         routed_records = sum(v for k, v in route_totals.items() if k in llm_routes)
         routed_records_with_items = sum(v for k, v in route_with_items.items() if k in llm_routes)
+        routed_records_with_error = sum(v for k, v in route_with_error.items() if k in llm_routes)
+        predicted_routed_records = sum(v for k, v in predicted_route_totals.items() if k in llm_routes)
+        predicted_routed_records_with_items = sum(
+            v for k, v in predicted_route_with_items.items() if k in llm_routes
+        )
+        predicted_routed_records_with_error = sum(
+            v for k, v in predicted_route_with_error.items() if k in llm_routes
+        )
         per_extractor[extractor] = {
             "records": records,
             "records_with_items": records_with_items,
@@ -219,8 +315,18 @@ def _count_llm_route_metrics(paths_by_extractor, route_by_chunk_id):
                 "records": routed_records,
                 "records_with_items": routed_records_with_items,
                 "yield_pct": _safe_pct(routed_records_with_items, routed_records),
+                "records_with_error": routed_records_with_error,
+                "error_rate_pct": _safe_pct(routed_records_with_error, routed_records),
+            },
+            "predicted_routed_to_llm": {
+                "records": predicted_routed_records,
+                "records_with_items": predicted_routed_records_with_items,
+                "yield_pct": _safe_pct(predicted_routed_records_with_items, predicted_routed_records),
+                "records_with_error": predicted_routed_records_with_error,
+                "error_rate_pct": _safe_pct(predicted_routed_records_with_error, predicted_routed_records),
             },
             "by_route": by_route,
+            "by_predicted_route": by_predicted_route,
         }
 
     for route_name, by_model in invalid_json_by_route_model.items():
@@ -229,9 +335,23 @@ def _count_llm_route_metrics(paths_by_extractor, route_by_chunk_id):
                 counts["invalid_json_records"], counts["records"]
             )
 
+    predicted_route_summary = {}
+    for route_name in sorted(predicted_route_totals_global.keys()):
+        total = predicted_route_totals_global[route_name]
+        yield_count = predicted_route_with_items_global.get(route_name, 0)
+        error_count = predicted_route_errors_global.get(route_name, 0)
+        predicted_route_summary[route_name] = {
+            "records": total,
+            "records_with_items": yield_count,
+            "yield_pct": _safe_pct(yield_count, total),
+            "records_with_error": error_count,
+            "error_rate_pct": _safe_pct(error_count, total),
+        }
+
     return {
         "per_extractor": per_extractor,
         "invalid_json_by_route_model": invalid_json_by_route_model,
+        "predicted_route_summary": predicted_route_summary,
         "yielded_chunk_ids": yielded_chunk_ids,
     }
 
@@ -358,6 +478,7 @@ def build_phase7(
             **({"conversations": conversations_path} if conversations_path is not None else {}),
         },
         triage_routes["route_by_chunk_id"],
+        triage_routes["predicted_route_by_chunk_id"],
     )
     stage_timing_ms = _load_stage_timing_ms(timings_path)
 
@@ -392,13 +513,36 @@ def build_phase7(
     route_breakdown = {}
     for route_name in sorted(triage_routes["route_counts"].keys()):
         count = triage_routes["route_counts"][route_name]
+        tokens_est = sum(
+            token
+            for chunk_id, token in triage_routes["token_est_by_chunk_id"].items()
+            if triage_routes["route_by_chunk_id"].get(chunk_id) == route_name
+        )
         route_breakdown[route_name] = {
             "count": count,
             "pct_of_chunks": _safe_pct(count, total_chunks),
+            "tokens_est": tokens_est,
+        }
+    predicted_route_breakdown = {}
+    for route_name in sorted(triage_routes["predicted_route_counts"].keys()):
+        count = triage_routes["predicted_route_counts"][route_name]
+        tokens_est = sum(
+            token
+            for chunk_id, token in triage_routes["token_est_by_chunk_id"].items()
+            if triage_routes["predicted_route_by_chunk_id"].get(chunk_id) == route_name
+        )
+        predicted_route_breakdown[route_name] = {
+            "count": count,
+            "pct_of_chunks": _safe_pct(count, total_chunks),
+            "tokens_est": tokens_est,
         }
     routed_to_llm_chunks = (
         triage_routes["route_counts"].get("llm_small", 0)
         + triage_routes["route_counts"].get("llm_large", 0)
+    )
+    predicted_routed_to_llm_chunks = (
+        triage_routes["predicted_route_counts"].get("llm_small", 0)
+        + triage_routes["predicted_route_counts"].get("llm_large", 0)
     )
 
     yield_per_1k_chunks = {
@@ -459,10 +603,16 @@ def build_phase7(
             "triage_records": triage_routes["triage_records"],
             "routed_to_llm_chunks": routed_to_llm_chunks,
             "routed_to_llm_pct": _safe_pct(routed_to_llm_chunks, total_chunks),
+            "routed_to_llm_tokens_est": triage_routes["routed_to_llm_tokens_est"],
+            "predicted_routed_to_llm_chunks": predicted_routed_to_llm_chunks,
+            "predicted_routed_to_llm_pct": _safe_pct(predicted_routed_to_llm_chunks, total_chunks),
+            "predicted_routed_to_llm_tokens_est": triage_routes["predicted_routed_to_llm_tokens_est"],
             "route_breakdown": route_breakdown,
+            "predicted_route_breakdown": predicted_route_breakdown,
         },
         "llm_yield_by_extractor": llm_route_metrics["per_extractor"],
         "llm_invalid_json_by_route_model": llm_route_metrics["invalid_json_by_route_model"],
+        "llm_yield_error_by_predicted_route": llm_route_metrics["predicted_route_summary"],
         "yield_per_1k_chunks": yield_per_1k_chunks,
         "stage_timing_ms": stage_timing_ms,
         "warnings": warnings,
@@ -491,6 +641,10 @@ def _print_summary(summary):
             "  triage_routed_to_llm_pct: "
             f"{triage.get('routed_to_llm_pct', 0.0)} "
             f"({triage.get('routed_to_llm_chunks', 0)}/{summary['total_chunks']})"
+        )
+        print(
+            "  triage_routed_to_llm_tokens_est: "
+            f"{triage.get('routed_to_llm_tokens_est', 0)}"
         )
     yield_per_1k = summary.get("yield_per_1k_chunks") or {}
     if yield_per_1k:
