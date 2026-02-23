@@ -43,11 +43,11 @@ These routes are implementation details, but the key is: **not all chunks go to 
 
 For each chunk:
 
-- [ ] Compute **text quality** features: length, non-whitespace ratio, OCR artifacts (e.g., high punctuation rate), repeated characters, word-shape diversity.
-- [ ] Compute **structure hint** features: dialogue markers, bullet density, table-ish patterns, presence of timestamps.
-- [ ] Compute **entity-ish hint** features (rules): honorifics (`Mr.`, `Dr.`), capitalized-name sequences, initials, common org suffixes, badge/ID patterns.
-- [ ] Compute **event-ish hint** features (rules): date patterns, time-of-day, “on/at/by” + date proximity, incident verbs (“arrested”, “interviewed”, “reported”).
-- [ ] Add **domain keyword** features with configurable keyword lists (case-specific + general).
+- [x] Compute **text quality** features: length, non-whitespace ratio, OCR artifacts (e.g., high punctuation rate), repeated characters, word-shape diversity.
+- [x] Compute **structure hint** features: dialogue markers, bullet density, table-ish patterns, presence of timestamps.
+- [x] Compute **entity-ish hint** features (rules): honorifics (`Mr.`, `Dr.`), capitalized-name sequences, initials, common org suffixes, badge/ID patterns.
+- [x] Compute **event-ish hint** features (rules): date patterns, time-of-day, “on/at/by” + date proximity, incident verbs (“arrested”, “interviewed”, “reported”).
+- [x] Add **domain keyword** features with configurable keyword lists (case-specific + general).
 
 Output: a `features` object plus derived `score` and `reasons[]`.
 
