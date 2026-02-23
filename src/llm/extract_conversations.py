@@ -2,6 +2,7 @@ import argparse
 import json
 import time
 import urllib.error
+from pathlib import Path
 
 from llm.provider_client import (
     DEFAULT_GEMINI_BASE_URL,
@@ -10,6 +11,7 @@ from llm.provider_client import (
     LLMProviderConfigError,
     call_llm,
 )
+from llm.cache import chunk_text_hash, connect_cache, default_cache_db_path, get_cached, put_cached
 
 
 def _parse_args():
@@ -68,6 +70,21 @@ def _parse_args():
         default=None,
         help="Optional limit on chunks processed.",
     )
+    parser.add_argument(
+        "--cache",
+        action="store_true",
+        help="Enable per-chunk caching to a local sqlite DB (off by default).",
+    )
+    parser.add_argument(
+        "--cache-db",
+        default=None,
+        help="Optional sqlite cache DB path (defaults to <output>.cache.sqlite when --cache is set).",
+    )
+    parser.add_argument(
+        "--cache-retry-errors",
+        action="store_true",
+        help="When caching is enabled, retry cached error records instead of reusing them.",
+    )
     return parser.parse_args()
 
 
@@ -123,6 +140,12 @@ def main():
     processed = 0
     errors = 0
     started = time.monotonic()
+    extractor_version = f"conversations:v1:{args.provider}:{model}"
+
+    cache_conn = None
+    if args.cache:
+        db_path = Path(args.cache_db) if args.cache_db else default_cache_db_path(args.output)
+        cache_conn = connect_cache(db_path)
 
     with open(args.input, "r", encoding="utf-8") as in_handle, open(
         args.output, "w", encoding="utf-8"
@@ -140,6 +163,24 @@ def main():
                 continue
 
             chunk_text = record.get("text", "")
+            chunk_id = record.get("chunk_id")
+            if cache_conn is not None and isinstance(chunk_id, str) and chunk_id:
+                text_hash = chunk_text_hash(chunk_text)
+                cached = get_cached(
+                    cache_conn,
+                    extractor_version=extractor_version,
+                    chunk_id=chunk_id,
+                    chunk_text_hash_value=text_hash,
+                )
+                if cached.hit and cached.output_record is not None:
+                    cached_error = cached.output_record.get("error")
+                    if not (args.cache_retry_errors and cached_error):
+                        out_handle.write(json.dumps(cached.output_record, ensure_ascii=True) + "\n")
+                        processed += 1
+                        if cached_error:
+                            errors += 1
+                        continue
+
             prompt = _build_prompt(chunk_text)
             error = None
             items = []
@@ -169,14 +210,27 @@ def main():
 
             output_record = {
                 "file_id": record.get("file_id"),
-                "chunk_id": record.get("chunk_id"),
+                "chunk_id": chunk_id,
                 "page_range": [record.get("page_start"), record.get("page_end")],
                 "items": items,
                 "model": model,
                 "error": error,
             }
             out_handle.write(json.dumps(output_record, ensure_ascii=True) + "\n")
+            if cache_conn is not None and isinstance(chunk_id, str) and chunk_id:
+                put_cached(
+                    cache_conn,
+                    extractor_version=extractor_version,
+                    chunk_id=chunk_id,
+                    chunk_text_hash_value=chunk_text_hash(chunk_text),
+                    output_record=output_record,
+                )
+                if processed % 1000 == 0:
+                    cache_conn.commit()
             processed += 1
+    if cache_conn is not None:
+        cache_conn.commit()
+        cache_conn.close()
 
     elapsed = round(time.monotonic() - started, 3)
     print("LLM conversations summary")

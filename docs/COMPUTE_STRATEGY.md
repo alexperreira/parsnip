@@ -113,13 +113,13 @@ For multi-model routing:
 
 Cache key:
 
-- [ ] Add `chunk_text_hash`: hash of normalized chunk text (normalize whitespace + NFC + strip nulls).
-- [ ] Include `extractor_version` in the cache key (prompt + schema + model + provider).
+- [x] Add `chunk_text_hash`: hash of normalized chunk text (normalize whitespace + NFC + strip nulls).
+- [x] Include `extractor_version` in the cache key (prompt + schema + model + provider).
 
 Store:
 
-- [ ] Store per-extractor output JSONL keyed by `(chunk_id, chunk_text_hash, extractor_version)`.
-- [ ] Store “result status” so failed calls don’t retry endlessly without an operator override.
+- [x] Store per-extractor output JSONL keyed by `(chunk_id, chunk_text_hash, extractor_version)`.
+- [x] Store “result status” so failed calls don’t retry endlessly without an operator override.
 
 This enables:
 
