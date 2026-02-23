@@ -40,6 +40,8 @@ class Phase7ValidateTest(unittest.TestCase):
             entities_path = root / "entities.jsonl"
             events_path = root / "events.jsonl"
             conversations_path = root / "conversations.jsonl"
+            triage_path = root / "triage.jsonl"
+            timings_path = root / "stage_timings.json"
             phase3_dir = root / "text"
             phase3_dir.mkdir(parents=True, exist_ok=True)
             shard_path = phase3_dir / "docs_0001.jsonl.gz"
@@ -56,25 +58,37 @@ class Phase7ValidateTest(unittest.TestCase):
             self._write_jsonl(
                 entities_path,
                 [
-                    {"chunk_id": "a:0-0", "items": [{"entity": "Alice"}], "error": None},
-                    {"chunk_id": "a:1-1", "items": [], "error": None},
-                    {"chunk_id": "b:0-0", "items": [{"entity": "Bob"}], "error": "invalid_json"},
+                    {"chunk_id": "a:0-0", "items": [{"entity": "Alice"}], "error": None, "model": "small-v1"},
+                    {"chunk_id": "a:1-1", "items": [], "error": None, "model": "small-v1"},
+                    {"chunk_id": "b:0-0", "items": [{"entity": "Bob"}], "error": "invalid_json", "model": "large-v1"},
                 ],
             )
             self._write_jsonl(
                 events_path,
                 [
-                    {"chunk_id": "a:0-0", "items": [], "error": None},
-                    {"chunk_id": "a:1-1", "items": [{"event": "Meeting"}], "error": None},
-                    {"chunk_id": "b:0-0", "items": [], "error": None},
+                    {"chunk_id": "a:0-0", "items": [], "error": None, "model": "small-v1"},
+                    {"chunk_id": "a:1-1", "items": [{"event": "Meeting"}], "error": None, "model": "small-v1"},
+                    {"chunk_id": "b:0-0", "items": [], "error": None, "model": "small-v1"},
                 ],
             )
             self._write_jsonl(
                 conversations_path,
                 [
-                    {"chunk_id": "a:0-0", "items": [], "error": "invalid_json"},
-                    {"chunk_id": "a:1-1", "items": [], "error": None},
+                    {"chunk_id": "a:0-0", "items": [], "error": "invalid_json", "model": "small-v1"},
+                    {"chunk_id": "a:1-1", "items": [], "error": None, "model": "small-v1"},
                 ],
+            )
+            self._write_jsonl(
+                triage_path,
+                [
+                    {"chunk_id": "a:0-0", "route": "llm_small"},
+                    {"chunk_id": "a:1-1", "route": "skip"},
+                    {"chunk_id": "b:0-0", "route": "llm_large"},
+                ],
+            )
+            timings_path.write_text(
+                json.dumps({"timings_ms": {"triage": 12, "llm": 34, "load": 56}}, ensure_ascii=True) + "\n",
+                encoding="utf-8",
             )
             self._write_jsonl_gz(
                 shard_path,
@@ -102,6 +116,8 @@ class Phase7ValidateTest(unittest.TestCase):
                 events_path=events_path,
                 phase3_path=phase3_dir,
                 conversations_path=conversations_path,
+                triage_path=triage_path,
+                timings_path=timings_path,
             )
 
             self.assertEqual(summary["total_chunks"], 3)
@@ -125,6 +141,26 @@ class Phase7ValidateTest(unittest.TestCase):
             self.assertEqual(summary["json_decode_errors"]["chunks"], 1)
             self.assertEqual(len(summary["warnings"]), 1)
             self.assertIn("phase3_low_quality_page_rate_high", summary["warnings"][0])
+            self.assertEqual(summary["triage_routing"]["triage_records"], 3)
+            self.assertEqual(summary["triage_routing"]["routed_to_llm_chunks"], 2)
+            self.assertEqual(summary["triage_routing"]["routed_to_llm_pct"], 66.667)
+            self.assertEqual(summary["triage_routing"]["route_breakdown"]["llm_small"]["count"], 1)
+            self.assertEqual(summary["triage_routing"]["route_breakdown"]["skip"]["count"], 1)
+            self.assertEqual(summary["llm_yield_by_extractor"]["entities"]["routed_to_llm"]["records"], 2)
+            self.assertEqual(summary["llm_yield_by_extractor"]["entities"]["routed_to_llm"]["records_with_items"], 1)
+            self.assertEqual(summary["llm_yield_by_extractor"]["entities"]["routed_to_llm"]["yield_pct"], 50.0)
+            self.assertEqual(
+                summary["llm_invalid_json_by_route_model"]["llm_large"]["large-v1"]["invalid_json_records"], 1
+            )
+            self.assertEqual(
+                summary["llm_invalid_json_by_route_model"]["llm_small"]["small-v1"]["invalid_json_records"], 1
+            )
+            self.assertEqual(summary["yield_per_1k_chunks"]["entities"], 666.667)
+            self.assertEqual(summary["yield_per_1k_chunks"]["events"], 333.333)
+            self.assertEqual(summary["yield_per_1k_chunks"]["any_extractor"], 666.667)
+            self.assertEqual(summary["stage_timing_ms"]["triage"], 12)
+            self.assertEqual(summary["stage_timing_ms"]["llm"], 34)
+            self.assertEqual(summary["stage_timing_ms"]["load"], 56)
 
     def test_build_phase7_warns_on_chunk_record_mismatch(self):
         with tempfile.TemporaryDirectory() as tmpdir:

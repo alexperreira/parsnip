@@ -28,7 +28,6 @@ from timeline.phase9_stitch_timeline import main as timeline_main
 from conversation_threading.phase10_thread_conversations import main as thread_main
 from triage.phase_t1_triage_chunks import main as triage_main
 from triage.build_route_dataset import main as route_dataset_main
-from triage.train_route_model import main as route_train_main
 
 app = typer.Typer(
     add_completion=False,
@@ -213,6 +212,8 @@ def route_dataset(ctx: typer.Context):
 
 @app.command("route-train", help="Train a baseline route classifier from route_dataset.jsonl.")
 def route_train(ctx: typer.Context):
+    from triage.train_route_model import main as route_train_main
+
     _dispatch_to_main("route-train", list(ctx.args), route_train_main)
 
 
@@ -343,6 +344,7 @@ def run(
     triage_large_chunks_path = output_path / "chunks.llm_large.jsonl"
     stage_timings_path = output_path / "stage_timings.json"
     stage_timings_ms = {}
+    triage_ran = False
     entities_path = output_path / "entities.jsonl"
     events_path = output_path / "events.jsonl"
     conversations_path = output_path / "conversations.jsonl"
@@ -418,6 +420,7 @@ def run(
             triage_args.extend(["--ner-model", str(triage_ner_model)])
         _dispatch_to_main("triage", triage_args, triage_main)
         _record_stage_timing("triage", stage_started)
+        triage_ran = True
     if "llm" in selected:
         stage_started = time.monotonic()
         llm_common_args = [
@@ -505,9 +508,9 @@ def run(
             "--phase3",
             str(text_output_dir),
         ]
-        if triage_path.exists():
+        if triage_ran:
             validate_args.extend(["--triage", str(triage_path)])
-        if stage_timings_path.exists():
+        if stage_timings_ms:
             validate_args.extend(["--timings", str(stage_timings_path)])
         _dispatch_to_main(
             "validate",
