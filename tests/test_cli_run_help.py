@@ -31,6 +31,8 @@ class CliRunHelpTest(unittest.TestCase):
         self.assertIn("--llm-gemini-base-url", output)
         self.assertIn("extract-text,chunk,triage,l", output)
         self.assertIn("--triage-max-llm-chunks", output)
+        self.assertIn("--triage-ml-route-model", output)
+        self.assertIn("--triage-ml-route-mode", output)
 
 
 if __name__ == "__main__":

@@ -327,6 +327,26 @@ def run(
         "--triage-route-skip-threshold",
         help="Score threshold below which triage routes to skip.",
     ),
+    triage_ml_route_model: str = typer.Option(
+        None,
+        "--triage-ml-route-model",
+        help="Optional trained route model artifact (.pkl) for triage ML routing.",
+    ),
+    triage_ml_route_mode: str = typer.Option(
+        "off",
+        "--triage-ml-route-mode",
+        help="ML routing mode for triage: off, report-only, or full (default: off).",
+    ),
+    triage_ml_route_skip_threshold: float = typer.Option(
+        0.90,
+        "--triage-ml-route-skip-threshold",
+        help="Only allow ML skip when P(skip) >= this threshold during triage.",
+    ),
+    triage_ml_route_large_threshold: float = typer.Option(
+        0.80,
+        "--triage-ml-route-large-threshold",
+        help="Allow ML llm_large when P(llm_large) >= this threshold during triage.",
+    ),
     no_interactive: bool = typer.Option(
         False,
         "--no-interactive",
@@ -398,11 +418,19 @@ def run(
             str(triage_route_large_threshold),
             "--route-skip-threshold",
             str(triage_route_skip_threshold),
+            "--ml-route-mode",
+            str(triage_ml_route_mode),
+            "--ml-route-skip-threshold",
+            str(triage_ml_route_skip_threshold),
+            "--ml-route-large-threshold",
+            str(triage_ml_route_large_threshold),
             "--small-output",
             triage_small_chunks_path.name,
             "--large-output",
             triage_large_chunks_path.name,
         ]
+        if triage_ml_route_model:
+            triage_args.extend(["--ml-route-model", str(triage_ml_route_model)])
         if triage_keyword_packs_dir:
             triage_args.extend(["--keyword-packs-dir", str(triage_keyword_packs_dir)])
         if triage_max_llm_chunks is not None:

@@ -41,6 +41,10 @@ class CliRunValidateArgsTest(unittest.TestCase):
                     triage_ner_model="en_core_web_sm",
                     triage_route_large_threshold=0.75,
                     triage_route_skip_threshold=0.10,
+                    triage_ml_route_model=None,
+                    triage_ml_route_mode="off",
+                    triage_ml_route_skip_threshold=0.90,
+                    triage_ml_route_large_threshold=0.80,
                     no_interactive=False,
                 )
 
@@ -81,6 +85,10 @@ class CliRunValidateArgsTest(unittest.TestCase):
                     triage_ner_model="en_core_web_sm",
                     triage_route_large_threshold=0.75,
                     triage_route_skip_threshold=0.10,
+                    triage_ml_route_model=None,
+                    triage_ml_route_mode="off",
+                    triage_ml_route_skip_threshold=0.90,
+                    triage_ml_route_large_threshold=0.80,
                     no_interactive=False,
                 )
 
@@ -89,6 +97,56 @@ class CliRunValidateArgsTest(unittest.TestCase):
             args = validate_calls[0][1]
             self.assertIn("--triage", args)
             self.assertIn("--timings", args)
+
+    def test_triage_step_passes_ml_route_flags(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            calls = []
+
+            def _capture(command, remainder, handler):
+                calls.append((command, list(remainder)))
+                return None
+
+            with patch("file_parser.cli._dispatch_to_main", side_effect=_capture):
+                cli.run(
+                    ctx=None,
+                    input_dir=str(output_dir),
+                    output_dir=str(output_dir),
+                    steps="triage",
+                    llm_provider="ollama",
+                    llm_model="llama3",
+                    llm_host="http://localhost:11434",
+                    llm_openai_base_url="https://api.openai.com/v1",
+                    llm_gemini_base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+                    llm_timeout=120,
+                    triage_keyword_packs_dir=None,
+                    triage_max_llm_chunks=5,
+                    triage_max_llm_chunks_per_file=2,
+                    triage_max_llm_tokens=500,
+                    triage_allow_file_ids=None,
+                    triage_deny_file_ids=None,
+                    triage_ner=False,
+                    triage_ner_model="en_core_web_sm",
+                    triage_route_large_threshold=0.75,
+                    triage_route_skip_threshold=0.10,
+                    triage_ml_route_model="output/ml/route_model.pkl",
+                    triage_ml_route_mode="report-only",
+                    triage_ml_route_skip_threshold=0.91,
+                    triage_ml_route_large_threshold=0.81,
+                    no_interactive=False,
+                )
+
+            triage_calls = [call for call in calls if call[0] == "triage"]
+            self.assertEqual(len(triage_calls), 1)
+            triage_args = triage_calls[0][1]
+            self.assertIn("--ml-route-model", triage_args)
+            self.assertIn("output/ml/route_model.pkl", triage_args)
+            self.assertIn("--ml-route-mode", triage_args)
+            self.assertIn("report-only", triage_args)
+            self.assertIn("--ml-route-skip-threshold", triage_args)
+            self.assertIn("0.91", triage_args)
+            self.assertIn("--ml-route-large-threshold", triage_args)
+            self.assertIn("0.81", triage_args)
 
 
 if __name__ == "__main__":
