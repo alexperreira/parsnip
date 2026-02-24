@@ -28,6 +28,7 @@ from timeline.phase9_stitch_timeline import main as timeline_main
 from conversation_threading.phase10_thread_conversations import main as thread_main
 from triage.phase_t1_triage_chunks import main as triage_main
 from triage.build_route_dataset import main as route_dataset_main
+from triage.sample_route_labels import main as route_sample_labels_main
 
 app = typer.Typer(
     add_completion=False,
@@ -215,6 +216,11 @@ def route_train(ctx: typer.Context):
     from triage.train_route_model import main as route_train_main
 
     _dispatch_to_main("route-train", list(ctx.args), route_train_main)
+
+
+@app.command("route-sample-labels", help="Sample uncertain route-dataset rows for labeling.")
+def route_sample_labels(ctx: typer.Context):
+    _dispatch_to_main("route-sample-labels", list(ctx.args), route_sample_labels_main)
 
 
 @app.command("validate", help="Run Phase 7 sanity checks.")
