@@ -31,6 +31,9 @@ Compute Strategy pipeline pieces implemented:
   - `src/triage/sample_route_labels.py` (CLI: `fileparse route-sample-labels`) samples uncertain score bands with redacted-or-none preview modes.
 - Validate rollout metrics:
   - `src/file_parser/phase7_validate.py` now reports routed-to-LLM chunk/token estimates and yield/error rollups by predicted route.
+- Optional two-pass large-route eval:
+  - `fileparse run --llm-two-pass-eval` now runs extractor CLIs over `chunks.llm_large.jsonl` and writes `*.llm_large.jsonl` outputs.
+  - `fileparse route-dataset` ingests `*.llm_large.jsonl` outcomes and prefers empirical `llm_large` labels when large-pass yields are observed.
 
 Tests exist for all of the above; `./.venv/bin/python -m pytest -q` passes.
 
@@ -152,10 +155,10 @@ Right now `llm_large` labels are heuristic-only because the pipeline does not ru
 
 Tasks:
 
-- [ ] Add an optional two-pass evaluation mode (not default):
-  - [ ] Run `llm_small` over `chunks.llm_small.jsonl`.
-  - [ ] Then run `llm_large` over `chunks.llm_large.jsonl` (or only over “small failed / empty” candidates).
-  - [ ] Store both outcomes, and update `route-dataset` builder to prefer empirical `llm_large` labels when available.
+- [x] Add an optional two-pass evaluation mode (not default):
+  - [x] Run `llm_small` over `chunks.llm_small.jsonl`.
+  - [x] Then run `llm_large` over `chunks.llm_large.jsonl` (or only over “small failed / empty” candidates).
+  - [x] Store both outcomes, and update `route-dataset` builder to prefer empirical `llm_large` labels when available.
 
 ### G) Rollout plan (safe + measurable)
 
@@ -181,6 +184,6 @@ Tasks:
 
 ## Known limitations (as of now)
 
-- `llm_large` labels in the dataset are heuristic unless you add a second-pass LLM evaluation mode.
+- `llm_large` labels remain heuristic unless second-pass `*.llm_large.jsonl` outcomes are provided (for example via `fileparse run --llm-two-pass-eval`).
 - `fileparse run` still executes only `chunks.llm_small.jsonl` through extractor CLIs (no default second-pass large route).
 - `fileparse run` doesn’t pass LLM `--cache` flags yet; caching is enabled per-extractor CLI only.

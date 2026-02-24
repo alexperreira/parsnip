@@ -283,6 +283,14 @@ def run(
         "--llm-timeout",
         help="LLM request timeout in seconds for the llm step (default: 120).",
     ),
+    llm_two_pass_eval: bool = typer.Option(
+        False,
+        "--llm-two-pass-eval",
+        help=(
+            "Optional two-pass LLM eval mode: after llm_small pass, also run extractors over "
+            "triage llm_large chunks and write *.llm_large.jsonl outputs."
+        ),
+    ),
     triage_keyword_packs_dir: str = typer.Option(
         None,
         "--triage-keyword-packs-dir",
@@ -374,6 +382,9 @@ def run(
     entities_path = output_path / "entities.jsonl"
     events_path = output_path / "events.jsonl"
     conversations_path = output_path / "conversations.jsonl"
+    entities_large_path = output_path / "entities.llm_large.jsonl"
+    events_large_path = output_path / "events.llm_large.jsonl"
+    conversations_large_path = output_path / "conversations.llm_large.jsonl"
     db_path = output_path / "store.sqlite"
 
     def _record_stage_timing(stage_name: str, started: float):
@@ -474,21 +485,33 @@ def run(
         llm_chunks_path = chunks_path
         if "triage" in selected and triage_small_chunks_path.exists():
             llm_chunks_path = triage_small_chunks_path
-        _dispatch_to_main(
-            "llm entities",
-            ["--input", str(llm_chunks_path), "--output", str(entities_path), *llm_common_args],
-            llm_entities_main,
-        )
-        _dispatch_to_main(
-            "llm events",
-            ["--input", str(llm_chunks_path), "--output", str(events_path), *llm_common_args],
-            llm_events_main,
-        )
-        _dispatch_to_main(
-            "llm conversations",
-            ["--input", str(llm_chunks_path), "--output", str(conversations_path), *llm_common_args],
-            llm_conversations_main,
-        )
+
+        def _run_llm_extractors(input_chunks_path: Path, entities_out: Path, events_out: Path, conversations_out: Path):
+            _dispatch_to_main(
+                "llm entities",
+                ["--input", str(input_chunks_path), "--output", str(entities_out), *llm_common_args],
+                llm_entities_main,
+            )
+            _dispatch_to_main(
+                "llm events",
+                ["--input", str(input_chunks_path), "--output", str(events_out), *llm_common_args],
+                llm_events_main,
+            )
+            _dispatch_to_main(
+                "llm conversations",
+                ["--input", str(input_chunks_path), "--output", str(conversations_out), *llm_common_args],
+                llm_conversations_main,
+            )
+
+        _run_llm_extractors(llm_chunks_path, entities_path, events_path, conversations_path)
+
+        if llm_two_pass_eval and triage_large_chunks_path.exists():
+            _run_llm_extractors(
+                triage_large_chunks_path,
+                entities_large_path,
+                events_large_path,
+                conversations_large_path,
+            )
         _record_stage_timing("llm", stage_started)
     if "load" in selected:
         stage_started = time.monotonic()

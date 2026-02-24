@@ -31,6 +31,7 @@ class CliRunValidateArgsTest(unittest.TestCase):
                     llm_openai_base_url="https://api.openai.com/v1",
                     llm_gemini_base_url="https://generativelanguage.googleapis.com/v1beta/openai",
                     llm_timeout=120,
+                    llm_two_pass_eval=False,
                     triage_keyword_packs_dir=None,
                     triage_max_llm_chunks=None,
                     triage_max_llm_chunks_per_file=None,
@@ -75,6 +76,7 @@ class CliRunValidateArgsTest(unittest.TestCase):
                     llm_openai_base_url="https://api.openai.com/v1",
                     llm_gemini_base_url="https://generativelanguage.googleapis.com/v1beta/openai",
                     llm_timeout=120,
+                    llm_two_pass_eval=False,
                     triage_keyword_packs_dir=None,
                     triage_max_llm_chunks=None,
                     triage_max_llm_chunks_per_file=None,
@@ -119,6 +121,7 @@ class CliRunValidateArgsTest(unittest.TestCase):
                     llm_openai_base_url="https://api.openai.com/v1",
                     llm_gemini_base_url="https://generativelanguage.googleapis.com/v1beta/openai",
                     llm_timeout=120,
+                    llm_two_pass_eval=False,
                     triage_keyword_packs_dir=None,
                     triage_max_llm_chunks=5,
                     triage_max_llm_chunks_per_file=2,
@@ -147,6 +150,61 @@ class CliRunValidateArgsTest(unittest.TestCase):
             self.assertIn("0.91", triage_args)
             self.assertIn("--ml-route-large-threshold", triage_args)
             self.assertIn("0.81", triage_args)
+
+    def test_llm_two_pass_eval_runs_large_route_extractors(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            # Presence of llm_large chunks enables second pass.
+            (output_dir / "chunks.llm_large.jsonl").write_text(
+                '{"chunk_id":"x:0-0","file_id":"x","text":"t"}\n',
+                encoding="utf-8",
+            )
+            calls = []
+
+            def _capture(command, remainder, handler):
+                calls.append((command, list(remainder)))
+                return None
+
+            with patch("file_parser.cli._dispatch_to_main", side_effect=_capture):
+                cli.run(
+                    ctx=None,
+                    input_dir=str(output_dir),
+                    output_dir=str(output_dir),
+                    steps="llm",
+                    llm_provider="ollama",
+                    llm_model="llama3",
+                    llm_host="http://localhost:11434",
+                    llm_openai_base_url="https://api.openai.com/v1",
+                    llm_gemini_base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+                    llm_timeout=120,
+                    llm_two_pass_eval=True,
+                    triage_keyword_packs_dir=None,
+                    triage_max_llm_chunks=None,
+                    triage_max_llm_chunks_per_file=None,
+                    triage_max_llm_tokens=None,
+                    triage_allow_file_ids=None,
+                    triage_deny_file_ids=None,
+                    triage_ner=False,
+                    triage_ner_model="en_core_web_sm",
+                    triage_route_large_threshold=0.75,
+                    triage_route_skip_threshold=0.10,
+                    triage_ml_route_model=None,
+                    triage_ml_route_mode="off",
+                    triage_ml_route_skip_threshold=0.90,
+                    triage_ml_route_large_threshold=0.80,
+                    no_interactive=False,
+                )
+
+            llm_calls = [call for call in calls if call[0].startswith("llm ")]
+            self.assertEqual(len(llm_calls), 6)
+            outputs = []
+            for _, args in llm_calls:
+                if "--output" in args:
+                    outputs.append(args[args.index("--output") + 1])
+            self.assertIn(str(output_dir / "entities.jsonl"), outputs)
+            self.assertIn(str(output_dir / "entities.llm_large.jsonl"), outputs)
+            self.assertIn(str(output_dir / "events.llm_large.jsonl"), outputs)
+            self.assertIn(str(output_dir / "conversations.llm_large.jsonl"), outputs)
 
 
 if __name__ == "__main__":

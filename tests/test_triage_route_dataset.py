@@ -57,6 +57,10 @@ class RouteDatasetBuilderTest(unittest.TestCase):
                 events_path=events,
                 conversations_path=conversations,
                 identity_signals_path=identity,
+                entities_large_path=None,
+                events_large_path=None,
+                conversations_large_path=None,
+                identity_signals_large_path=None,
                 output_path=out,
                 include_features=True,
             )
@@ -122,6 +126,10 @@ class RouteDatasetBuilderTest(unittest.TestCase):
                 events_path=events,
                 conversations_path=conversations,
                 identity_signals_path=identity,
+                entities_large_path=None,
+                events_large_path=None,
+                conversations_large_path=None,
+                identity_signals_large_path=None,
                 output_path=out,
                 labels_path=labels,
                 include_features=True,
@@ -131,6 +139,71 @@ class RouteDatasetBuilderTest(unittest.TestCase):
             row = json.loads(out.read_text(encoding="utf-8").strip())
             self.assertEqual(row["labels"]["label_route"], "llm_large")
             self.assertEqual(row["labels"]["label_source"], "human")
+
+    def test_build_route_dataset_prefers_empirical_large_yield(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            chunks = root / "chunks.jsonl"
+            triage = root / "triage.jsonl"
+            entities = root / "entities.jsonl"
+            events = root / "events.jsonl"
+            conversations = root / "conversations.jsonl"
+            identity = root / "identity_signals.jsonl"
+            entities_large = root / "entities.llm_large.jsonl"
+            out = root / "ml" / "route_dataset.jsonl"
+
+            self._write_jsonl(
+                chunks,
+                [
+                    {"file_id": "a", "chunk_id": "a:0-0", "page_start": 0, "page_end": 0, "text": "dense appendix"},
+                ],
+            )
+            self._write_jsonl(
+                triage,
+                [
+                    {
+                        "file_id": "a",
+                        "chunk_id": "a:0-0",
+                        "score": 0.5,
+                        "route": "llm_large",
+                        "token_est": 20,
+                        "features": {"text_quality": {"char_len": 100}},
+                    }
+                ],
+            )
+            self._write_jsonl(entities, [])
+            self._write_jsonl(events, [])
+            self._write_jsonl(conversations, [])
+            self._write_jsonl(identity, [])
+            self._write_jsonl(
+                entities_large,
+                [
+                    {"chunk_id": "a:0-0", "items": [{"entity": "X"}], "error": None, "model": "m-large"},
+                ],
+            )
+
+            summary = build_route_dataset(
+                chunks_path=chunks,
+                triage_path=triage,
+                entities_path=entities,
+                events_path=events,
+                conversations_path=conversations,
+                identity_signals_path=identity,
+                entities_large_path=entities_large,
+                events_large_path=None,
+                conversations_large_path=None,
+                identity_signals_large_path=None,
+                output_path=out,
+                include_features=True,
+            )
+            self.assertEqual(summary["rows_written"], 1)
+            self.assertEqual(summary["rows_labeled_empirical_large"], 1)
+
+            row = json.loads(out.read_text(encoding="utf-8").strip())
+            self.assertEqual(row["labels"]["label_route"], "llm_large")
+            self.assertEqual(row["labels"]["label_source"], "empirical_large_yield")
+            self.assertTrue(row["derived"]["any_large_yield"])
+            self.assertIn("outcomes_large", row)
 
 
 if __name__ == "__main__":

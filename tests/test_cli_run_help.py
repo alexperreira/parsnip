@@ -29,6 +29,7 @@ class CliRunHelpTest(unittest.TestCase):
         self.assertIn("--llm-model", output)
         self.assertIn("--llm-openai-base-url", output)
         self.assertIn("--llm-gemini-base-url", output)
+        self.assertIn("--llm-two-pass-eval", output)
         self.assertIn("extract-text,chunk,triage,l", output)
         self.assertIn("--triage-max-llm-chunks", output)
         self.assertIn("--triage-ml-route-model", output)

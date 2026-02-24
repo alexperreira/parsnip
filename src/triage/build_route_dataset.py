@@ -41,6 +41,26 @@ def _parse_args():
         help="Identity signals output JSONL path (default: output/identity_signals.jsonl).",
     )
     parser.add_argument(
+        "--entities-large",
+        default="output/entities.llm_large.jsonl",
+        help="Optional llm_large entities JSONL path (default: output/entities.llm_large.jsonl).",
+    )
+    parser.add_argument(
+        "--events-large",
+        default="output/events.llm_large.jsonl",
+        help="Optional llm_large events JSONL path (default: output/events.llm_large.jsonl).",
+    )
+    parser.add_argument(
+        "--conversations-large",
+        default="output/conversations.llm_large.jsonl",
+        help="Optional llm_large conversations JSONL path (default: output/conversations.llm_large.jsonl).",
+    )
+    parser.add_argument(
+        "--identity-signals-large",
+        default="output/identity_signals.llm_large.jsonl",
+        help="Optional llm_large identity signals JSONL path (default: output/identity_signals.llm_large.jsonl).",
+    )
+    parser.add_argument(
         "--output",
         default="output/ml/route_dataset.jsonl",
         help="Output dataset JSONL path (default: output/ml/route_dataset.jsonl).",
@@ -186,6 +206,10 @@ def build_route_dataset(
     events_path: Path,
     conversations_path: Path,
     identity_signals_path: Path,
+    entities_large_path: Optional[Path],
+    events_large_path: Optional[Path],
+    conversations_large_path: Optional[Path],
+    identity_signals_large_path: Optional[Path],
     output_path: Path,
     labels_path: Optional[Path] = None,
     skip_threshold: float = 0.10,
@@ -210,12 +234,21 @@ def build_route_dataset(
     outcomes_events = _load_llm_outcomes(events_path)
     outcomes_conversations = _load_llm_outcomes(conversations_path)
     outcomes_identity = _load_llm_outcomes(identity_signals_path)
+    outcomes_entities_large = _load_llm_outcomes(entities_large_path) if entities_large_path else {}
+    outcomes_events_large = _load_llm_outcomes(events_large_path) if events_large_path else {}
+    outcomes_conversations_large = (
+        _load_llm_outcomes(conversations_large_path) if conversations_large_path else {}
+    )
+    outcomes_identity_large = (
+        _load_llm_outcomes(identity_signals_large_path) if identity_signals_large_path else {}
+    )
 
     human_labels = _load_human_labels(labels_path)
 
     written = 0
     missing_triage = 0
     missing_ids = 0
+    empirical_large_labeled = 0
 
     with open_text_writer(output_path) as out_handle:
         for chunk in _iter_jsonl(chunks_path):
@@ -246,6 +279,16 @@ def build_route_dataset(
             conv = outcomes_conversations.get(chunk_id) or LLMOutcome(0, None, None)
             ident = outcomes_identity.get(chunk_id) or LLMOutcome(0, None, None)
             any_yield = ent.yield_nonempty or evt.yield_nonempty or conv.yield_nonempty or ident.yield_nonempty
+            ent_large = outcomes_entities_large.get(chunk_id) or LLMOutcome(0, None, None)
+            evt_large = outcomes_events_large.get(chunk_id) or LLMOutcome(0, None, None)
+            conv_large = outcomes_conversations_large.get(chunk_id) or LLMOutcome(0, None, None)
+            ident_large = outcomes_identity_large.get(chunk_id) or LLMOutcome(0, None, None)
+            any_large_yield = (
+                ent_large.yield_nonempty
+                or evt_large.yield_nonempty
+                or conv_large.yield_nonempty
+                or ident_large.yield_nonempty
+            )
 
             label_route = _label_route(
                 triage_score=triage_score_val,
@@ -255,6 +298,10 @@ def build_route_dataset(
                 large_threshold=large_threshold,
             )
             label_source = "heuristic_from_yield"
+            if any_large_yield and not any_yield:
+                label_route = "llm_large"
+                label_source = "empirical_large_yield"
+                empirical_large_labeled += 1
 
             override = human_labels.get((chunk_id, text_hash))
             if override:
@@ -284,9 +331,38 @@ def build_route_dataset(
                 },
                 "derived": {
                     "any_yield": any_yield,
+                    "any_large_yield": any_large_yield,
                     "low_quality": low_quality,
                 },
             }
+            if (
+                entities_large_path
+                or events_large_path
+                or conversations_large_path
+                or identity_signals_large_path
+            ):
+                row["outcomes_large"] = {
+                    "entities": {
+                        "items_count": ent_large.items_count,
+                        "error": ent_large.error,
+                        "model": ent_large.model,
+                    },
+                    "events": {
+                        "items_count": evt_large.items_count,
+                        "error": evt_large.error,
+                        "model": evt_large.model,
+                    },
+                    "conversations": {
+                        "items_count": conv_large.items_count,
+                        "error": conv_large.error,
+                        "model": conv_large.model,
+                    },
+                    "identity_signals": {
+                        "items_count": ident_large.items_count,
+                        "error": ident_large.error,
+                        "model": ident_large.model,
+                    },
+                }
             if include_features:
                 row["features"] = features
 
@@ -297,6 +373,7 @@ def build_route_dataset(
         "rows_written": written,
         "missing_triage": missing_triage,
         "missing_ids": missing_ids,
+        "rows_labeled_empirical_large": empirical_large_labeled,
     }
 
 
@@ -309,6 +386,10 @@ def main():
         events_path=Path(args.events),
         conversations_path=Path(args.conversations),
         identity_signals_path=Path(args.identity_signals),
+        entities_large_path=Path(args.entities_large) if args.entities_large else None,
+        events_large_path=Path(args.events_large) if args.events_large else None,
+        conversations_large_path=Path(args.conversations_large) if args.conversations_large else None,
+        identity_signals_large_path=Path(args.identity_signals_large) if args.identity_signals_large else None,
         output_path=Path(args.output),
         labels_path=Path(args.labels) if args.labels else None,
         skip_threshold=float(args.skip_threshold),
@@ -323,4 +404,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
