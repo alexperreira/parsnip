@@ -247,6 +247,80 @@ class TriagePhaseT1Test(unittest.TestCase):
             ]
             self.assertEqual(len(selected_small) + len(selected_large), 1)
 
+    def test_build_triage_shadow_mode_can_add_but_not_remove(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            chunks_path = root / "chunks.jsonl"
+            out_dir = root / "out_shadow"
+            model_path = root / "route_model.pkl"
+
+            self._write_jsonl(
+                chunks_path,
+                [
+                    {
+                        "chunk_id": "a:0-0",
+                        "file_id": "a",
+                        "page_start": 0,
+                        "page_end": 0,
+                        "text": "warrant affidavit on 2025-01-02 at 10:35 PM demote",
+                    },
+                    {
+                        "chunk_id": "a:1-1",
+                        "file_id": "a",
+                        "page_start": 1,
+                        "page_end": 1,
+                        "text": "promote",
+                    },
+                ],
+            )
+
+            # Model predicts skip for tokens containing "demote", llm_small for "promote".
+            fake_model = {
+                "model_type": "multinomial_nb",
+                "classes": ["skip", "llm_small", "llm_large"],
+                "vocab": {"promote": 0, "demote": 1},
+                "log_priors": {"skip": 0.0, "llm_small": 0.0, "llm_large": -5.0},
+                "log_unknown_probs": {"skip": -1.0, "llm_small": -1.0, "llm_large": -1.0},
+                "log_token_probs": {
+                    "skip": [-4.0, 0.0],
+                    "llm_small": [0.0, -4.0],
+                    "llm_large": [-4.0, -4.0],
+                },
+                "alpha": 1.0,
+                "token_regex": r"[A-Za-z0-9_]+",
+            }
+            with model_path.open("wb") as handle:
+                pickle.dump(fake_model, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+            summary = build_triage(
+                chunks_path=chunks_path,
+                output_dir=out_dir,
+                route_skip_threshold=0.2,
+                ml_route_mode="shadow",
+                ml_route_model_path=model_path,
+            )
+            self.assertEqual(summary["ml_route_mode"], "shadow")
+            self.assertTrue(summary["ml_model_loaded"])
+
+            triage_rows = [
+                json.loads(line)
+                for line in Path(summary["triage_path"]).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            by_id = {row["chunk_id"]: row for row in triage_rows}
+
+            # Heuristic LLM chunk remains LLM even if model predicts skip.
+            self.assertEqual(by_id["a:0-0"]["heuristic_route"], "llm_small")
+            self.assertEqual(by_id["a:0-0"]["ml_route"]["predicted_route"], "skip")
+            self.assertEqual(by_id["a:0-0"]["route"], "llm_small")
+            self.assertEqual(by_id["a:0-0"]["ml_route"]["effective_route"], "llm_small")
+
+            # Heuristic skip chunk can be added to LLM by model in shadow mode.
+            self.assertEqual(by_id["a:1-1"]["heuristic_route"], "skip")
+            self.assertEqual(by_id["a:1-1"]["ml_route"]["predicted_route"], "llm_small")
+            self.assertEqual(by_id["a:1-1"]["route"], "llm_small")
+            self.assertEqual(by_id["a:1-1"]["ml_route"]["effective_route"], "llm_small")
+
 
 if __name__ == "__main__":
     unittest.main()

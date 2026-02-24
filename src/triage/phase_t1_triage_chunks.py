@@ -101,8 +101,11 @@ def _parse_args():
     parser.add_argument(
         "--ml-route-mode",
         default="off",
-        choices=["off", "report-only", "full"],
-        help="ML routing mode: off (heuristic only), report-only (predict only), full (route from model policy).",
+        choices=["off", "report-only", "shadow", "full"],
+        help=(
+            "ML routing mode: off (heuristic only), report-only (predict only), "
+            "shadow (add-to-LLM only), full (route from model policy)."
+        ),
     )
     parser.add_argument(
         "--ml-route-skip-threshold",
@@ -205,6 +208,21 @@ def _route_from_model_policy(
         return "llm_large", gates
     gates.append("default_llm_small")
     return "llm_small", gates
+
+
+def _effective_route_for_mode(
+    *,
+    heuristic_route: str,
+    model_route: str,
+    ml_route_mode: str,
+) -> Tuple[str, str]:
+    if ml_route_mode == "report-only":
+        return heuristic_route, "report_only_keep_heuristic"
+    if ml_route_mode == "shadow":
+        if heuristic_route == "skip" and model_route in {"llm_small", "llm_large"}:
+            return model_route, "shadow_add_from_skip"
+        return heuristic_route, "shadow_keep_heuristic"
+    return model_route, "full_policy_route"
 
 
 def build_triage(
@@ -314,7 +332,11 @@ def build_triage(
                         heuristic_large_threshold=route_large_threshold,
                     )
                     counts["ml_predictions_total"] += 1
-                    effective_route = heuristic_route if ml_route_mode == "report-only" else model_route
+                    effective_route, mode_gate = _effective_route_for_mode(
+                        heuristic_route=heuristic_route,
+                        model_route=model_route,
+                        ml_route_mode=ml_route_mode,
+                    )
                     route = effective_route
                     ml_summary = {
                         "mode": ml_route_mode,
@@ -322,7 +344,7 @@ def build_triage(
                         "predicted_route": model_route,
                         "effective_route": effective_route,
                         "probabilities": probs,
-                        "policy_gates": policy_gates,
+                        "policy_gates": [*policy_gates, mode_gate],
                     }
                 else:
                     ml_summary = {

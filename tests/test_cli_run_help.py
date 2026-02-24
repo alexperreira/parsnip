@@ -33,6 +33,7 @@ class CliRunHelpTest(unittest.TestCase):
         self.assertIn("--triage-max-llm-chunks", output)
         self.assertIn("--triage-ml-route-model", output)
         self.assertIn("--triage-ml-route-mode", output)
+        self.assertIn("shadow", output)
 
 
 if __name__ == "__main__":

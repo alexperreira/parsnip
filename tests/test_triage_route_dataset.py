@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from triage.build_route_dataset import build_route_dataset
+from llm.cache import chunk_text_hash
 
 
 class RouteDatasetBuilderTest(unittest.TestCase):
@@ -66,7 +67,71 @@ class RouteDatasetBuilderTest(unittest.TestCase):
             self.assertEqual(by_id["a:0-0"]["labels"]["label_route"], "llm_small")
             self.assertEqual(by_id["a:1-1"]["labels"]["label_route"], "skip")
 
+    def test_build_route_dataset_applies_human_label_overrides(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            chunks = root / "chunks.jsonl"
+            triage = root / "triage.jsonl"
+            entities = root / "entities.jsonl"
+            events = root / "events.jsonl"
+            conversations = root / "conversations.jsonl"
+            identity = root / "identity_signals.jsonl"
+            labels = root / "labels.jsonl"
+            out = root / "ml" / "route_dataset.jsonl"
+
+            text = "sparse text"
+            self._write_jsonl(
+                chunks,
+                [
+                    {"file_id": "a", "chunk_id": "a:0-0", "page_start": 0, "page_end": 0, "text": text},
+                ],
+            )
+            self._write_jsonl(
+                triage,
+                [
+                    {
+                        "file_id": "a",
+                        "chunk_id": "a:0-0",
+                        "score": 0.02,
+                        "route": "skip",
+                        "token_est": 3,
+                        "features": {"text_quality": {"char_len": 11}},
+                    },
+                ],
+            )
+            self._write_jsonl(entities, [])
+            self._write_jsonl(events, [])
+            self._write_jsonl(conversations, [])
+            self._write_jsonl(identity, [])
+            self._write_jsonl(
+                labels,
+                [
+                    {
+                        "chunk_id": "a:0-0",
+                        "chunk_text_hash": chunk_text_hash(text),
+                        "label_route": "llm_large",
+                        "label_source": "human",
+                    }
+                ],
+            )
+
+            summary = build_route_dataset(
+                chunks_path=chunks,
+                triage_path=triage,
+                entities_path=entities,
+                events_path=events,
+                conversations_path=conversations,
+                identity_signals_path=identity,
+                output_path=out,
+                labels_path=labels,
+                include_features=True,
+            )
+            self.assertEqual(summary["rows_written"], 1)
+
+            row = json.loads(out.read_text(encoding="utf-8").strip())
+            self.assertEqual(row["labels"]["label_route"], "llm_large")
+            self.assertEqual(row["labels"]["label_source"], "human")
+
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -341,7 +341,7 @@ def run(
     triage_ml_route_mode: str = typer.Option(
         "off",
         "--triage-ml-route-mode",
-        help="ML routing mode for triage: off, report-only, or full (default: off).",
+        help="ML routing mode for triage: off, report-only, shadow, or full (default: off).",
     ),
     triage_ml_route_skip_threshold: float = typer.Option(
         0.90,
