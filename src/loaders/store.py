@@ -1,7 +1,9 @@
+import re
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = "6"
+SCHEMA_VERSION = "7"
+_PROMPT_HASH_RE = re.compile(r"^[0-9a-f]{32,128}$")
 
 
 def connect_db(db_path):
@@ -10,6 +12,13 @@ def connect_db(db_path):
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
+
+
+def _ensure_table_columns(conn, table_name, required_columns):
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})")}
+    for column_name, column_type in required_columns.items():
+        if column_name not in existing:
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
 
 
 def ensure_schema(conn, overwrite=False):
@@ -166,6 +175,12 @@ def ensure_schema(conn, overwrite=False):
         "page_start INTEGER,"
         "page_end INTEGER,"
         "quote TEXT,"
+        "char_start INTEGER,"
+        "char_end INTEGER,"
+        "source_phase TEXT,"
+        "extractor_version TEXT,"
+        "model TEXT,"
+        "prompt_hash TEXT,"
         "UNIQUE(person_text, attribute, value, confidence, file_id, chunk_id, page_start, page_end, quote)"
         ")"
     )
@@ -180,6 +195,12 @@ def ensure_schema(conn, overwrite=False):
         "page_start INTEGER,"
         "page_end INTEGER,"
         "quote TEXT,"
+        "char_start INTEGER,"
+        "char_end INTEGER,"
+        "source_phase TEXT,"
+        "extractor_version TEXT,"
+        "model TEXT,"
+        "prompt_hash TEXT,"
         "UNIQUE(entity, type, confidence, file_id, chunk_id, page_start, page_end, quote)"
         ")"
     )
@@ -194,6 +215,12 @@ def ensure_schema(conn, overwrite=False):
         "page_start INTEGER,"
         "page_end INTEGER,"
         "quote TEXT,"
+        "char_start INTEGER,"
+        "char_end INTEGER,"
+        "source_phase TEXT,"
+        "extractor_version TEXT,"
+        "model TEXT,"
+        "prompt_hash TEXT,"
         "UNIQUE(event, date, confidence, file_id, chunk_id, page_start, page_end, quote)"
         ")"
     )
@@ -207,6 +234,12 @@ def ensure_schema(conn, overwrite=False):
         "page_start INTEGER,"
         "page_end INTEGER,"
         "quote TEXT,"
+        "char_start INTEGER,"
+        "char_end INTEGER,"
+        "source_phase TEXT,"
+        "extractor_version TEXT,"
+        "model TEXT,"
+        "prompt_hash TEXT,"
         "UNIQUE(speaker, confidence, file_id, chunk_id, page_start, page_end, quote)"
         ")"
     )
@@ -281,6 +314,54 @@ def ensure_schema(conn, overwrite=False):
         "value TEXT NOT NULL"
         ")"
     )
+    _ensure_table_columns(
+        conn,
+        "entities",
+        {
+            "char_start": "INTEGER",
+            "char_end": "INTEGER",
+            "source_phase": "TEXT",
+            "extractor_version": "TEXT",
+            "model": "TEXT",
+            "prompt_hash": "TEXT",
+        },
+    )
+    _ensure_table_columns(
+        conn,
+        "events",
+        {
+            "char_start": "INTEGER",
+            "char_end": "INTEGER",
+            "source_phase": "TEXT",
+            "extractor_version": "TEXT",
+            "model": "TEXT",
+            "prompt_hash": "TEXT",
+        },
+    )
+    _ensure_table_columns(
+        conn,
+        "conversations",
+        {
+            "char_start": "INTEGER",
+            "char_end": "INTEGER",
+            "source_phase": "TEXT",
+            "extractor_version": "TEXT",
+            "model": "TEXT",
+            "prompt_hash": "TEXT",
+        },
+    )
+    _ensure_table_columns(
+        conn,
+        "identity_signals",
+        {
+            "char_start": "INTEGER",
+            "char_end": "INTEGER",
+            "source_phase": "TEXT",
+            "extractor_version": "TEXT",
+            "model": "TEXT",
+            "prompt_hash": "TEXT",
+        },
+    )
 
     conn.execute(
         "INSERT INTO meta(key, value) VALUES ('schema_version', ?) "
@@ -324,6 +405,22 @@ def ensure_schema(conn, overwrite=False):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_identity_signals_attr_value_norm "
         "ON identity_signals(attribute, value_norm)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_identity_signals_provenance "
+        "ON identity_signals(source_phase, extractor_version)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entities_provenance "
+        "ON entities(source_phase, extractor_version)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_events_provenance "
+        "ON events(source_phase, extractor_version)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_conversations_provenance "
+        "ON conversations(source_phase, extractor_version)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_person_observations_chunk "
@@ -403,6 +500,36 @@ def canonical_quote(value):
     if cleaned is None:
         return None
     return " ".join(cleaned.split())
+
+
+def canonical_prompt_hash(value):
+    cleaned = as_clean_text(value)
+    if cleaned is None:
+        return None
+    lowered = cleaned.lower()
+    if not _PROMPT_HASH_RE.match(lowered):
+        return None
+    return lowered
+
+
+def normalize_char_span(char_start_value, char_end_value):
+    char_start = _as_int(char_start_value)
+    char_end = _as_int(char_end_value)
+    if char_start is None and char_end is None:
+        return None, None
+    if char_start is None or char_end is None:
+        return None, None
+    if char_start < 0 or char_end < 0 or char_end < char_start:
+        return None, None
+    return char_start, char_end
+
+
+def normalize_source_phase(value, default_value):
+    return as_clean_text(value) or default_value
+
+
+def normalize_extractor_version(value, default_value):
+    return as_clean_text(value) or default_value
 
 
 def _as_int(value):

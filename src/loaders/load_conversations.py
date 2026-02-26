@@ -7,11 +7,17 @@ from loaders.store import (
     as_clean_text,
     as_float,
     canonical_quote,
+    canonical_prompt_hash,
     connect_db,
     ensure_schema,
     mark_loader_run,
+    normalize_char_span,
+    normalize_extractor_version,
     normalize_page_range,
+    normalize_source_phase,
 )
+
+DEFAULT_SOURCE_PHASE = "llm.extract_conversations"
 
 
 def _parse_args():
@@ -73,6 +79,13 @@ def build_load_conversations(input_path, db_path, overwrite=False):
             if not file_id or not chunk_id or not isinstance(items, list):
                 summary["invalid_record_shape"] += 1
                 continue
+            source_phase = normalize_source_phase(record.get("source_phase"), DEFAULT_SOURCE_PHASE)
+            extractor_version = normalize_extractor_version(
+                record.get("extractor_version"),
+                f"{source_phase}:legacy",
+            )
+            model = as_clean_text(record.get("model"))
+            prompt_hash = canonical_prompt_hash(record.get("prompt_hash"))
 
             page_start, page_end = normalize_page_range(record.get("page_range"))
             for item in items:
@@ -86,6 +99,23 @@ def build_load_conversations(input_path, db_path, overwrite=False):
                     summary["invalid_item_shape"] += 1
                     summary["rows_skipped"] += 1
                     continue
+                char_start, char_end = normalize_char_span(
+                    item.get("char_start"),
+                    item.get("char_end"),
+                )
+                if char_start is None and char_end is None and isinstance(item.get("char_range"), (list, tuple)):
+                    char_range = item.get("char_range")
+                    char_start, char_end = normalize_char_span(
+                        char_range[0] if len(char_range) > 0 else None,
+                        char_range[1] if len(char_range) > 1 else None,
+                    )
+                item_source_phase = normalize_source_phase(item.get("source_phase"), source_phase)
+                item_extractor_version = normalize_extractor_version(
+                    item.get("extractor_version"),
+                    extractor_version,
+                )
+                item_model = as_clean_text(item.get("model")) or model
+                item_prompt_hash = canonical_prompt_hash(item.get("prompt_hash")) or prompt_hash
 
                 row = (
                     speaker,
@@ -95,11 +125,18 @@ def build_load_conversations(input_path, db_path, overwrite=False):
                     page_start,
                     page_end,
                     canonical_quote(item.get("quote")),
+                    char_start,
+                    char_end,
+                    item_source_phase,
+                    item_extractor_version,
+                    item_model,
+                    item_prompt_hash,
                 )
                 result = conn.execute(
                     "INSERT OR IGNORE INTO conversations("
-                    "speaker, confidence, file_id, chunk_id, page_start, page_end, quote"
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "speaker, confidence, file_id, chunk_id, page_start, page_end, quote, "
+                    "char_start, char_end, source_phase, extractor_version, model, prompt_hash"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     row,
                 )
                 if result.rowcount == 1:

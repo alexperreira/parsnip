@@ -1,0 +1,14 @@
+{
+  "file_id": "6a95efbe513308f6ce0012f9ec9f57ace23ec5b2f4d2851ee33ec9f6dc1049c2",
+  "chunk_id": "6a95efbe513308f6ce0012f9ec9f57ace23ec5b2f4d2851ee33ec9f6dc1049c2:4-5",
+  "page_start": 4,
+  "page_end": 5,
+  "char_start": 12,
+  "char_end": 58,
+  "quote": "  Jane Doe approved the request on March 5, 2025.  ",
+  "source_phase": "llm.extract_events",
+  "extractor_version": "v0.7.1",
+  "model": "gpt-5-mini",
+  "prompt_hash": "61f7ef8f53b0c8a85d62f6e4a3a13b8f0d2782d7d05a8b8f12947407af7db0ea",
+  "confidence": 0.86
+}
