@@ -206,6 +206,71 @@ class CliRunValidateArgsTest(unittest.TestCase):
             self.assertIn(str(output_dir / "events.llm_large.jsonl"), outputs)
             self.assertIn(str(output_dir / "conversations.llm_large.jsonl"), outputs)
 
+    def test_llm_step_uses_triage_route_filters_when_triage_selected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            # Simulate triage artifact presence; _dispatch_to_main is mocked in this test.
+            (output_dir / "triage.jsonl").write_text(
+                '{"chunk_id":"x:0-0","route":"llm_small"}\n',
+                encoding="utf-8",
+            )
+            calls = []
+
+            def _capture(command, remainder, handler):
+                calls.append((command, list(remainder)))
+                return None
+
+            with patch("file_parser.cli._dispatch_to_main", side_effect=_capture):
+                cli.run(
+                    ctx=None,
+                    input_dir=str(output_dir),
+                    output_dir=str(output_dir),
+                    steps="triage,llm",
+                    llm_provider="ollama",
+                    llm_model="llama3",
+                    llm_small_model="llama3.1:8b",
+                    llm_large_model="qwen2.5:32b",
+                    llm_host="http://localhost:11434",
+                    llm_openai_base_url="https://api.openai.com/v1",
+                    llm_gemini_base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+                    llm_timeout=120,
+                    llm_two_pass_eval=True,
+                    triage_keyword_packs_dir=None,
+                    triage_max_llm_chunks=None,
+                    triage_max_llm_chunks_per_file=None,
+                    triage_max_llm_tokens=None,
+                    triage_allow_file_ids=None,
+                    triage_deny_file_ids=None,
+                    triage_ner=False,
+                    triage_ner_model="en_core_web_sm",
+                    triage_route_large_threshold=0.75,
+                    triage_route_skip_threshold=0.10,
+                    triage_ml_route_model=None,
+                    triage_ml_route_mode="off",
+                    triage_ml_route_skip_threshold=0.90,
+                    triage_ml_route_large_threshold=0.80,
+                    no_interactive=False,
+                )
+
+            llm_calls = [call for call in calls if call[0].startswith("llm ")]
+            self.assertEqual(len(llm_calls), 6)
+            first_pass = llm_calls[:3]
+            second_pass = llm_calls[3:]
+            for _, args in first_pass:
+                self.assertIn("--triage", args)
+                self.assertIn(str(output_dir / "triage.jsonl"), args)
+                self.assertIn("--triage-routes", args)
+                self.assertIn("llm_small", args)
+                self.assertIn("--model", args)
+                self.assertIn("llama3.1:8b", args)
+            for _, args in second_pass:
+                self.assertIn("--triage", args)
+                self.assertIn(str(output_dir / "triage.jsonl"), args)
+                self.assertIn("--triage-routes", args)
+                self.assertIn("llm_large", args)
+                self.assertIn("--model", args)
+                self.assertIn("qwen2.5:32b", args)
+
 
 if __name__ == "__main__":
     unittest.main()

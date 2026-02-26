@@ -205,7 +205,7 @@ Testing approach recommendation:
 This plan only changes the shard compression format. It does not address mixed-PDF
 quality/cost issues.
 
-- [ ] `L2 — Smarter Mixed-PDF Handling` (recommended next if you expect many `mixed` PDFs):
+- [x] `L2 — Smarter Mixed-PDF Handling` (implemented; see `docs/MIXED_PDF.md`):
   - Add deterministic per-page decisions for `mixed` PDFs: use embedded text where present,
     OCR only image-heavy / low-text pages.
   - Add per-page quality scoring fields in Phase 3 page records.

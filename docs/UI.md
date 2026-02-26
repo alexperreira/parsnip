@@ -144,20 +144,20 @@ UI v1 reads from existing tables only; no UI-owned derived persistence.
 - [x] Implement interactive timeline with normalized/unresolved date handling and source drill-down.
 - [x] Implement evidence browser with faceted filtering, pagination, and document-page provenance links.
 - [x] Integrate dedupe and conversation-thread indicators where available from backend outputs.
-- [ ] Add cross-screen shared filters (case, person, date range, confidence) with URL-state persistence.
-- [ ] Add loading/empty/error states and fail-soft widget-level recovery behavior.
+- [x] Add cross-screen shared filters (case, person, date range, confidence) with URL-state persistence.
+- [x] Add loading/empty/error states and fail-soft widget-level recovery behavior.
 - [ ] Add instrumentation dashboards for UI performance and failure metrics.
 - [ ] Run end-to-end validation on representative case sets and document known gaps.
 
 ## Definition of Done (UI v1)
 
-- [ ] All four core screens are functional with linked provenance.
-- [ ] Users can trace every key claim to source evidence.
-- [ ] Timeline behavior is deterministic for normalized and unresolved dates.
-- [ ] Entity aliases/dedup state is visible and navigable.
+- [x] All four core screens are functional with linked provenance.
+- [x] Users can trace every key claim to source evidence.
+- [x] Timeline behavior is deterministic for normalized and unresolved dates.
+- [x] Entity aliases/dedup state is visible and navigable.
 - [ ] No critical accessibility violations in the agreed checklist.
 - [ ] Telemetry and redacted error reporting are enabled.
-- [ ] v1 limitations are documented with explicit follow-up items.
+- [x] v1 limitations are documented with explicit follow-up items.
 
 ## Out of Scope for Initial UI v1
 

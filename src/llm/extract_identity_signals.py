@@ -12,6 +12,7 @@ from llm.provider_client import (
     call_llm,
 )
 from llm.cache import chunk_text_hash, connect_cache, default_cache_db_path, get_cached, put_cached
+from llm.triage_routes import chunk_is_selected, load_triage_routes, parse_allowed_routes
 
 
 ALLOWED_ATTRIBUTES = {"dob", "address", "case_id"}
@@ -89,6 +90,16 @@ def _parse_args():
         "--cache-retry-errors",
         action="store_true",
         help="When caching is enabled, retry cached error records instead of reusing them.",
+    )
+    parser.add_argument(
+        "--triage",
+        default=None,
+        help="Optional triage JSONL path used to filter chunks by route.",
+    )
+    parser.add_argument(
+        "--triage-routes",
+        default="llm_small,llm_large",
+        help="Comma-separated triage routes to include when --triage is set (default: llm_small,llm_large).",
     )
     return parser.parse_args()
 
@@ -182,8 +193,11 @@ def main():
     model = _resolve_model(args)
     processed = 0
     errors = 0
+    triage_skipped = 0
     started = time.monotonic()
     extractor_version = f"identity-signals:v1:{args.provider}:{model}"
+    route_by_chunk_id = load_triage_routes(args.triage)
+    allowed_routes = parse_allowed_routes(args.triage_routes)
 
     cache_conn = None
     if args.cache:
@@ -207,6 +221,13 @@ def main():
 
             chunk_text = record.get("text", "")
             chunk_id = record.get("chunk_id")
+            if not chunk_is_selected(
+                chunk_id,
+                route_by_chunk_id=route_by_chunk_id,
+                allowed_routes=allowed_routes,
+            ):
+                triage_skipped += 1
+                continue
             if cache_conn is not None and isinstance(chunk_id, str) and chunk_id:
                 text_hash = chunk_text_hash(chunk_text)
                 cached = get_cached(
@@ -279,6 +300,8 @@ def main():
     print("LLM identity signals summary")
     print(f"  processed: {processed}")
     print(f"  errors: {errors}")
+    if route_by_chunk_id is not None:
+        print(f"  triage_skipped: {triage_skipped}")
     print(f"  elapsed_seconds: {elapsed}")
 
 

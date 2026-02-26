@@ -27,6 +27,8 @@ class CliRunHelpTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=output)
         self.assertIn("--llm-provider", output)
         self.assertIn("--llm-model", output)
+        self.assertIn("--llm-small-model", output)
+        self.assertIn("--llm-large-model", output)
         self.assertIn("--llm-openai-base-url", output)
         self.assertIn("--llm-gemini-base-url", output)
         self.assertIn("--llm-two-pass-eval", output)

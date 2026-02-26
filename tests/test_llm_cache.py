@@ -137,7 +137,67 @@ class LLMCacheIntegrationTest(unittest.TestCase):
             record = json.loads(out.read_text(encoding="utf-8").splitlines()[0])
             self.assertIsNone(record["error"])
 
+    def test_entities_triage_route_filter(self):
+        from llm import extract_entities
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            chunks = root / "chunks.jsonl"
+            triage = root / "triage.jsonl"
+            out = root / "entities.jsonl"
+            self._write_chunks(
+                chunks,
+                [
+                    {
+                        "file_id": "a",
+                        "chunk_id": "a:0-0",
+                        "page_start": 0,
+                        "page_end": 0,
+                        "text": "Alice met Bob.",
+                    },
+                    {
+                        "file_id": "a",
+                        "chunk_id": "a:1-1",
+                        "page_start": 1,
+                        "page_end": 1,
+                        "text": "Charlie met Dana.",
+                    },
+                ],
+            )
+            triage.write_text(
+                '{"chunk_id":"a:0-0","route":"llm_small"}\n'
+                '{"chunk_id":"a:1-1","route":"skip"}\n',
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(
+                extract_entities,
+                "call_llm",
+                return_value='{"items":[{"entity":"Alice","type":"PERSON","quote":"Alice","confidence":0.9}]}',
+            ) as call_mock:
+                argv = [
+                    "extract_entities",
+                    "--input",
+                    str(chunks),
+                    "--output",
+                    str(out),
+                    "--triage",
+                    str(triage),
+                    "--triage-routes",
+                    "llm_small",
+                ]
+                with mock.patch("sys.argv", argv):
+                    extract_entities.main()
+                self.assertEqual(call_mock.call_count, 1)
+
+            output_records = [
+                json.loads(line)
+                for line in out.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(output_records), 1)
+            self.assertEqual(output_records[0]["chunk_id"], "a:0-0")
+
 
 if __name__ == "__main__":
     unittest.main()
-

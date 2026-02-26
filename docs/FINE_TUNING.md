@@ -12,7 +12,8 @@ Compute Strategy pipeline pieces implemented:
 - Stage 3 scoring/budgets: `src/triage/scoring.py` (`score_from_features`, `select_under_budgets`).
 - Stage 4 triage + wiring: `src/triage/phase_t1_triage_chunks.py` + `fileparse triage` + `fileparse run --steps ...` wiring in `src/file_parser/cli.py`.
   - Emits `output/triage.jsonl`, `output/chunks.llm_small.jsonl`, `output/chunks.llm_large.jsonl`.
-  - `fileparse run` currently feeds **only** `chunks.llm_small.jsonl` into LLM extractors (no second-pass over `chunks.llm_large.jsonl` yet).
+  - `fileparse run` LLM step now supports route-aware internal filtering from `triage.jsonl` while reading `chunks.jsonl`.
+  - Route-specific model overrides are available via `--llm-small-model` and `--llm-large-model`.
 - Stage 5 caching: `src/llm/cache.py` + `--cache/--cache-db/--cache-retry-errors` flags in:
   - `src/llm/extract_entities.py`
   - `src/llm/extract_events.py`
@@ -185,5 +186,5 @@ Tasks:
 ## Known limitations (as of now)
 
 - `llm_large` labels remain heuristic unless second-pass `*.llm_large.jsonl` outcomes are provided (for example via `fileparse run --llm-two-pass-eval`).
-- `fileparse run` still executes only `chunks.llm_small.jsonl` through extractor CLIs (no default second-pass large route).
+- `fileparse run` defaults to the `llm_small` route only; second-pass `llm_large` extraction is still opt-in via `--llm-two-pass-eval`.
 - `fileparse run` doesn’t pass LLM `--cache` flags yet; caching is enabled per-extractor CLI only.

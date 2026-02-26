@@ -263,6 +263,16 @@ def run(
         "--llm-model",
         help="LLM model name for the llm step (default: llama3).",
     ),
+    llm_small_model: str = typer.Option(
+        None,
+        "--llm-small-model",
+        help="Optional model override for llm_small routed chunks (defaults to --llm-model).",
+    ),
+    llm_large_model: str = typer.Option(
+        None,
+        "--llm-large-model",
+        help="Optional model override for llm_large routed chunks (defaults to --llm-model).",
+    ),
     llm_host: str = typer.Option(
         DEFAULT_OLLAMA_HOST,
         "--llm-host",
@@ -468,50 +478,104 @@ def run(
         triage_ran = True
     if "llm" in selected:
         stage_started = time.monotonic()
-        llm_common_args = [
-            "--provider",
-            str(llm_provider),
-            "--model",
-            str(llm_model),
-            "--host",
-            str(llm_host),
-            "--openai-base-url",
-            str(llm_openai_base_url),
-            "--gemini-base-url",
-            str(llm_gemini_base_url),
-            "--timeout",
-            str(llm_timeout),
-        ]
-        llm_chunks_path = chunks_path
-        if "triage" in selected and triage_small_chunks_path.exists():
-            llm_chunks_path = triage_small_chunks_path
+        llm_small_effective_model = str(llm_small_model) if llm_small_model else str(llm_model)
+        llm_large_effective_model = str(llm_large_model) if llm_large_model else str(llm_model)
 
-        def _run_llm_extractors(input_chunks_path: Path, entities_out: Path, events_out: Path, conversations_out: Path):
+        def _llm_common_args_for_model(model_name: str) -> list[str]:
+            return [
+                "--provider",
+                str(llm_provider),
+                "--model",
+                model_name,
+                "--host",
+                str(llm_host),
+                "--openai-base-url",
+                str(llm_openai_base_url),
+                "--gemini-base-url",
+                str(llm_gemini_base_url),
+                "--timeout",
+                str(llm_timeout),
+            ]
+        triage_filter_enabled = "triage" in selected and triage_path.exists()
+
+        def _run_llm_extractors(
+            input_chunks_path: Path,
+            entities_out: Path,
+            events_out: Path,
+            conversations_out: Path,
+            *,
+            triage_routes: str | None = None,
+            model_name: str,
+        ):
+            triage_args = []
+            if triage_filter_enabled and triage_routes:
+                triage_args = ["--triage", str(triage_path), "--triage-routes", triage_routes]
+            llm_common_args = _llm_common_args_for_model(model_name)
             _dispatch_to_main(
                 "llm entities",
-                ["--input", str(input_chunks_path), "--output", str(entities_out), *llm_common_args],
+                [
+                    "--input",
+                    str(input_chunks_path),
+                    "--output",
+                    str(entities_out),
+                    *llm_common_args,
+                    *triage_args,
+                ],
                 llm_entities_main,
             )
             _dispatch_to_main(
                 "llm events",
-                ["--input", str(input_chunks_path), "--output", str(events_out), *llm_common_args],
+                [
+                    "--input",
+                    str(input_chunks_path),
+                    "--output",
+                    str(events_out),
+                    *llm_common_args,
+                    *triage_args,
+                ],
                 llm_events_main,
             )
             _dispatch_to_main(
                 "llm conversations",
-                ["--input", str(input_chunks_path), "--output", str(conversations_out), *llm_common_args],
+                [
+                    "--input",
+                    str(input_chunks_path),
+                    "--output",
+                    str(conversations_out),
+                    *llm_common_args,
+                    *triage_args,
+                ],
                 llm_conversations_main,
             )
 
-        _run_llm_extractors(llm_chunks_path, entities_path, events_path, conversations_path)
+        _run_llm_extractors(
+            chunks_path,
+            entities_path,
+            events_path,
+            conversations_path,
+            triage_routes="llm_small" if triage_filter_enabled else None,
+            model_name=llm_small_effective_model,
+        )
 
-        if llm_two_pass_eval and triage_large_chunks_path.exists():
-            _run_llm_extractors(
-                triage_large_chunks_path,
-                entities_large_path,
-                events_large_path,
-                conversations_large_path,
-            )
+        if llm_two_pass_eval:
+            if triage_filter_enabled:
+                _run_llm_extractors(
+                    chunks_path,
+                    entities_large_path,
+                    events_large_path,
+                    conversations_large_path,
+                    triage_routes="llm_large",
+                    model_name=llm_large_effective_model,
+                )
+            elif triage_large_chunks_path.exists():
+                # Backward-compatible fallback for existing llm_large chunk streams.
+                _run_llm_extractors(
+                    triage_large_chunks_path,
+                    entities_large_path,
+                    events_large_path,
+                    conversations_large_path,
+                    model_name=llm_large_effective_model,
+                )
         _record_stage_timing("llm", stage_started)
     if "load" in selected:
         stage_started = time.monotonic()

@@ -15,7 +15,7 @@ This is an implementation plan for `docs/TODO_LONG_TERM.md` item **L8 — Comput
 
 - Phase 3 emits normalized text outputs under `output/text/`.
 - Phase 4 produces `output/text/chunks.jsonl`.
-- Phase 5 runs LLM extraction over **all** chunks (entities/events/conversations/identity signals).
+- Phase 5 runs LLM extraction over all chunks by default; when triage is enabled, extraction runs on selected chunk streams.
 - Phase 7 reports yield + invalid JSON rate metrics.
 
 Compute Strategy adds a new decision layer between **chunking** and **LLM**.
@@ -99,15 +99,15 @@ When budget is exceeded, remaining chunks are deterministically deprioritized by
 Update the LLM stage to accept a chunk stream to process (rather than assuming “all chunks”):
 
 - [x] v1: emit `chunks.llm_small.jsonl` / `chunks.llm_large.jsonl` (subset streams) and point the existing LLM extractors at the selected stream.
-- [ ] v2: pass a `triage.jsonl` alongside `chunks.jsonl` and let the LLM stage internally select by `route`.
+- [x] v2: pass a `triage.jsonl` alongside `chunks.jsonl` and let the LLM stage internally select by `route`.
 
 For multi-model routing:
 
-- [ ] Route `llm_small` to the faster/cheaper model for high-confidence “easy” chunks.
+- [x] Route `llm_small` to the faster/cheaper model for high-confidence “easy” chunks.
 - [ ] Reserve `llm_large` for:
-  - low-quality but high-value chunks
-  - complex narrative sections
-  - chunks that failed `llm_small` (invalid JSON / refusal / empty extraction)
+  - [x] low-quality but high-value chunks
+  - [ ] complex narrative sections
+  - [ ] chunks that failed `llm_small` (invalid JSON / refusal / empty extraction)
 
 ## Stage 5: caching and reruns (critical for cost)
 
@@ -132,11 +132,11 @@ This enables:
 Prefer starting with a **classifier for routing**, not a full extractor:
 
 - [ ] Collect training labels from:
-   - existing LLM outputs (yield vs empty)
-   - operator “review” decisions
-   - downstream resolver/timeline utility signals
-- [ ] Train a lightweight model to predict `route` or “send_to_llm” probability.
-- [ ] Keep a deterministic fallback and retain budget caps.
+   - [x] existing LLM outputs (yield vs empty)
+   - [x] operator “review” decisions
+   - [ ] downstream resolver/timeline utility signals
+- [x] Train a lightweight model to predict `route` or “send_to_llm” probability.
+- [x] Keep a deterministic fallback and retain budget caps.
 
 Only consider fine-tuning an extractor if:
 
@@ -167,36 +167,36 @@ These files contain the original chunk records, unchanged, but filtered by route
 
 Add Phase 7 metrics that make triage measurable:
 
-- [ ] Report `% chunks routed to LLM` and breakdown by route.
-- [ ] Report yield per routed chunk (entities/events/conversations).
-- [ ] Report yield per 1k chunks scanned (end-to-end).
-- [ ] Report invalid JSON rate by route/model.
-- [ ] Report time per stage (triage/llm/load/validate).
+- [x] Report `% chunks routed to LLM` and breakdown by route.
+- [x] Report yield per routed chunk (entities/events/conversations).
+- [x] Report yield per 1k chunks scanned (end-to-end).
+- [x] Report invalid JSON rate by route/model.
+- [x] Report time per stage (triage/llm/load/validate).
 
 All metrics should be computable without storing raw chunk text in logs.
 
 ## CLI integration plan
 
-- [ ] Add `fileparse triage` command (input: `output/text/chunks.jsonl`, output: `output/triage.jsonl` + optional filtered chunk files).
-- [ ] Add `triage` to `fileparse run --steps ...` between `chunk` and `llm`.
-- [ ] Add `--triage-*` flags for thresholds, keyword packs, and budgets.
+- [x] Add `fileparse triage` command (input: `output/text/chunks.jsonl`, output: `output/triage.jsonl` + optional filtered chunk files).
+- [x] Add `triage` to `fileparse run --steps ...` between `chunk` and `llm`.
+- [x] Add `--triage-*` flags for thresholds, keyword packs, and budgets.
 
 ## Test plan (deterministic, no LLM required)
 
-- [ ] Add unit tests for:
+- [x] Add unit tests for:
   - feature extraction (keyword hits, pattern detection)
   - scoring determinism + stable tie-breaks
   - budget cap behavior
   - `triage.jsonl` schema validation + redaction rules
-- [ ] Add golden tests with a tiny synthetic `chunks.jsonl` fixture.
+- [x] Add golden tests with a tiny synthetic `chunks.jsonl` fixture.
 - [ ] Add an integration test for `fileparse run --steps extract-text,chunk,triage` producing stable outputs.
 
 ## Rollout sequence (minimize risk)
 
-- [ ] **Report-only:** triage computes scores/routes but does not affect LLM selection; outputs metrics only.
-- [ ] **Soft gating:** filter only the lowest-score tail (`skip`) with conservative thresholds.
-- [ ] **Full routing:** enable `llm_small/llm_large` splits + budget caps; add caching.
-- [ ] **Optional ML routing:** train and evaluate a routing classifier; keep deterministic fallback.
+- [x] **Report-only:** triage computes scores/routes but does not affect LLM selection; outputs metrics only.
+- [x] **Soft gating:** filter only the lowest-score tail (`skip`) with conservative thresholds.
+- [x] **Full routing:** enable `llm_small/llm_large` splits + budget caps; add caching.
+- [x] **Optional ML routing:** train and evaluate a routing classifier; keep deterministic fallback.
 
 ## Known edge cases (to design for)
 
