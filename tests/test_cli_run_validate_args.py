@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+import json
 
 from file_parser import cli
 
@@ -32,6 +33,7 @@ class CliRunValidateArgsTest(unittest.TestCase):
                     llm_gemini_base_url="https://generativelanguage.googleapis.com/v1beta/openai",
                     llm_timeout=120,
                     llm_two_pass_eval=False,
+                    llm_retry_small_failures=False,
                     triage_keyword_packs_dir=None,
                     triage_max_llm_chunks=None,
                     triage_max_llm_chunks_per_file=None,
@@ -77,6 +79,7 @@ class CliRunValidateArgsTest(unittest.TestCase):
                     llm_gemini_base_url="https://generativelanguage.googleapis.com/v1beta/openai",
                     llm_timeout=120,
                     llm_two_pass_eval=False,
+                    llm_retry_small_failures=False,
                     triage_keyword_packs_dir=None,
                     triage_max_llm_chunks=None,
                     triage_max_llm_chunks_per_file=None,
@@ -122,6 +125,7 @@ class CliRunValidateArgsTest(unittest.TestCase):
                     llm_gemini_base_url="https://generativelanguage.googleapis.com/v1beta/openai",
                     llm_timeout=120,
                     llm_two_pass_eval=False,
+                    llm_retry_small_failures=False,
                     triage_keyword_packs_dir=None,
                     triage_max_llm_chunks=5,
                     triage_max_llm_chunks_per_file=2,
@@ -178,6 +182,7 @@ class CliRunValidateArgsTest(unittest.TestCase):
                     llm_gemini_base_url="https://generativelanguage.googleapis.com/v1beta/openai",
                     llm_timeout=120,
                     llm_two_pass_eval=True,
+                    llm_retry_small_failures=False,
                     triage_keyword_packs_dir=None,
                     triage_max_llm_chunks=None,
                     triage_max_llm_chunks_per_file=None,
@@ -196,7 +201,7 @@ class CliRunValidateArgsTest(unittest.TestCase):
                 )
 
             llm_calls = [call for call in calls if call[0].startswith("llm ")]
-            self.assertEqual(len(llm_calls), 6)
+            self.assertEqual(len(llm_calls), 8)
             outputs = []
             for _, args in llm_calls:
                 if "--output" in args:
@@ -205,6 +210,7 @@ class CliRunValidateArgsTest(unittest.TestCase):
             self.assertIn(str(output_dir / "entities.llm_large.jsonl"), outputs)
             self.assertIn(str(output_dir / "events.llm_large.jsonl"), outputs)
             self.assertIn(str(output_dir / "conversations.llm_large.jsonl"), outputs)
+            self.assertIn(str(output_dir / "identity_signals.llm_large.jsonl"), outputs)
 
     def test_llm_step_uses_triage_route_filters_when_triage_selected(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -235,6 +241,7 @@ class CliRunValidateArgsTest(unittest.TestCase):
                     llm_gemini_base_url="https://generativelanguage.googleapis.com/v1beta/openai",
                     llm_timeout=120,
                     llm_two_pass_eval=True,
+                    llm_retry_small_failures=False,
                     triage_keyword_packs_dir=None,
                     triage_max_llm_chunks=None,
                     triage_max_llm_chunks_per_file=None,
@@ -253,9 +260,9 @@ class CliRunValidateArgsTest(unittest.TestCase):
                 )
 
             llm_calls = [call for call in calls if call[0].startswith("llm ")]
-            self.assertEqual(len(llm_calls), 6)
-            first_pass = llm_calls[:3]
-            second_pass = llm_calls[3:]
+            self.assertEqual(len(llm_calls), 8)
+            first_pass = llm_calls[:4]
+            second_pass = llm_calls[4:]
             for _, args in first_pass:
                 self.assertIn("--triage", args)
                 self.assertIn(str(output_dir / "triage.jsonl"), args)
@@ -270,6 +277,184 @@ class CliRunValidateArgsTest(unittest.TestCase):
                 self.assertIn("llm_large", args)
                 self.assertIn("--model", args)
                 self.assertIn("qwen2.5:32b", args)
+
+    def test_llm_retries_small_failures_on_large_model(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            chunks_dir = output_dir / "text"
+            chunks_dir.mkdir(parents=True, exist_ok=True)
+            (chunks_dir / "chunks.jsonl").write_text(
+                json.dumps(
+                    {
+                        "chunk_id": "x:0-0",
+                        "file_id": "x",
+                        "page_start": 0,
+                        "page_end": 0,
+                        "text": "retry me",
+                    },
+                    ensure_ascii=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            calls = []
+
+            def _capture(command, remainder, handler):
+                args = list(remainder)
+                calls.append((command, args))
+                if command.startswith("llm "):
+                    output_path = Path(args[args.index("--output") + 1])
+                    model_name = args[args.index("--model") + 1]
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    if model_name == "small-v1":
+                        payload = {
+                            "chunk_id": "x:0-0",
+                            "file_id": "x",
+                            "page_range": [0, 0],
+                            "items": [],
+                            "model": model_name,
+                            "error": "invalid_json",
+                        }
+                    else:
+                        payload = {
+                            "chunk_id": "x:0-0",
+                            "file_id": "x",
+                            "page_range": [0, 0],
+                            "items": [{"ok": True}],
+                            "model": model_name,
+                            "error": None,
+                        }
+                    output_path.write_text(json.dumps(payload, ensure_ascii=True) + "\n", encoding="utf-8")
+                return None
+
+            with patch("file_parser.cli._dispatch_to_main", side_effect=_capture):
+                cli.run(
+                    ctx=None,
+                    input_dir=str(output_dir),
+                    output_dir=str(output_dir),
+                    steps="llm",
+                    llm_provider="ollama",
+                    llm_model="base-v1",
+                    llm_small_model="small-v1",
+                    llm_large_model="large-v1",
+                    llm_host="http://localhost:11434",
+                    llm_openai_base_url="https://api.openai.com/v1",
+                    llm_gemini_base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+                    llm_timeout=120,
+                    llm_two_pass_eval=False,
+                    llm_retry_small_failures=True,
+                    triage_keyword_packs_dir=None,
+                    triage_max_llm_chunks=None,
+                    triage_max_llm_chunks_per_file=None,
+                    triage_max_llm_tokens=None,
+                    triage_allow_file_ids=None,
+                    triage_deny_file_ids=None,
+                    triage_ner=False,
+                    triage_ner_model="en_core_web_sm",
+                    triage_route_large_threshold=0.75,
+                    triage_route_skip_threshold=0.10,
+                    triage_ml_route_model=None,
+                    triage_ml_route_mode="off",
+                    triage_ml_route_skip_threshold=0.90,
+                    triage_ml_route_large_threshold=0.80,
+                    no_interactive=False,
+                )
+
+            llm_calls = [call for call in calls if call[0].startswith("llm ")]
+            self.assertEqual(len(llm_calls), 8)
+
+            runtime_chunks = str(output_dir / "chunks.llm_large.runtime.jsonl")
+            for _, args in llm_calls[4:]:
+                self.assertIn("--input", args)
+                self.assertIn(runtime_chunks, args)
+                self.assertIn("--model", args)
+                self.assertIn("large-v1", args)
+
+    def test_llm_retry_requires_chunks_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            with self.assertRaises(SystemExit) as ctx:
+                cli.run(
+                    ctx=None,
+                    input_dir=str(output_dir),
+                    output_dir=str(output_dir),
+                    steps="llm",
+                    llm_provider="ollama",
+                    llm_model="base-v1",
+                    llm_small_model="small-v1",
+                    llm_large_model="large-v1",
+                    llm_host="http://localhost:11434",
+                    llm_openai_base_url="https://api.openai.com/v1",
+                    llm_gemini_base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+                    llm_timeout=120,
+                    llm_two_pass_eval=False,
+                    llm_retry_small_failures=True,
+                    triage_keyword_packs_dir=None,
+                    triage_max_llm_chunks=None,
+                    triage_max_llm_chunks_per_file=None,
+                    triage_max_llm_tokens=None,
+                    triage_allow_file_ids=None,
+                    triage_deny_file_ids=None,
+                    triage_ner=False,
+                    triage_ner_model="en_core_web_sm",
+                    triage_route_large_threshold=0.75,
+                    triage_route_skip_threshold=0.10,
+                    triage_ml_route_model=None,
+                    triage_ml_route_mode="off",
+                    triage_ml_route_skip_threshold=0.90,
+                    triage_ml_route_large_threshold=0.80,
+                    no_interactive=False,
+                )
+            self.assertIn("LLM retry requires chunks", str(ctx.exception))
+
+    def test_load_step_skips_identity_signals_when_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            calls = []
+
+            def _capture(command, remainder, handler):
+                calls.append((command, list(remainder)))
+                return None
+
+            with patch("file_parser.cli._dispatch_to_main", side_effect=_capture):
+                cli.run(
+                    ctx=None,
+                    input_dir=str(output_dir),
+                    output_dir=str(output_dir),
+                    steps="load",
+                    llm_provider="ollama",
+                    llm_model="base-v1",
+                    llm_small_model=None,
+                    llm_large_model=None,
+                    llm_host="http://localhost:11434",
+                    llm_openai_base_url="https://api.openai.com/v1",
+                    llm_gemini_base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+                    llm_timeout=120,
+                    llm_two_pass_eval=False,
+                    llm_retry_small_failures=False,
+                    triage_keyword_packs_dir=None,
+                    triage_max_llm_chunks=None,
+                    triage_max_llm_chunks_per_file=None,
+                    triage_max_llm_tokens=None,
+                    triage_allow_file_ids=None,
+                    triage_deny_file_ids=None,
+                    triage_ner=False,
+                    triage_ner_model="en_core_web_sm",
+                    triage_route_large_threshold=0.75,
+                    triage_route_skip_threshold=0.10,
+                    triage_ml_route_model=None,
+                    triage_ml_route_mode="off",
+                    triage_ml_route_skip_threshold=0.90,
+                    triage_ml_route_large_threshold=0.80,
+                    no_interactive=False,
+                )
+
+            commands = [name for name, _ in calls]
+            self.assertIn("load entities", commands)
+            self.assertIn("load events", commands)
+            self.assertIn("load conversations", commands)
+            self.assertNotIn("load identity-signals", commands)
 
 
 if __name__ == "__main__":

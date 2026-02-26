@@ -1,5 +1,6 @@
 import argparse
 import json
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, Tuple
@@ -64,6 +65,11 @@ def _parse_args():
         "--output",
         default="output/ml/route_dataset.jsonl",
         help="Output dataset JSONL path (default: output/ml/route_dataset.jsonl).",
+    )
+    parser.add_argument(
+        "--db",
+        default="output/store.sqlite",
+        help="Optional SQLite path for downstream utility labels (default: output/store.sqlite).",
     )
     parser.add_argument(
         "--labels",
@@ -198,6 +204,61 @@ def _label_route(
     return "llm_small"
 
 
+def _load_downstream_utility(db_path: Optional[Path]) -> Dict[str, Dict[str, int]]:
+    if db_path is None or not db_path.exists():
+        return {}
+
+    utility_by_chunk: Dict[str, Dict[str, int]] = {}
+
+    def _bump(chunk_id: str, key: str, value: Any):
+        count = _as_int(value)
+        if count <= 0:
+            return
+        bucket = utility_by_chunk.setdefault(chunk_id, {})
+        bucket[key] = bucket.get(key, 0) + count
+
+    try:
+        conn = sqlite3.connect(db_path)
+    except sqlite3.Error:
+        return {}
+
+    try:
+        table_names = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+            if isinstance(row[0], str)
+        }
+
+        if {"events", "event_times"}.issubset(table_names):
+            cursor = conn.execute(
+                "SELECT e.chunk_id, COUNT(*) "
+                "FROM events e "
+                "JOIN event_times t ON t.event_id = e.event_id "
+                "WHERE t.status = 'ok' "
+                "GROUP BY e.chunk_id"
+            )
+            for chunk_id, count in cursor:
+                if isinstance(chunk_id, str) and chunk_id:
+                    _bump(chunk_id, "timeline_ok_events", count)
+
+        if {"person_observations", "person_cluster_members"}.issubset(table_names):
+            cursor = conn.execute(
+                "SELECT o.chunk_id, COUNT(DISTINCT o.obs_id) "
+                "FROM person_observations o "
+                "JOIN person_cluster_members m ON m.obs_id = o.obs_id "
+                "GROUP BY o.chunk_id"
+            )
+            for chunk_id, count in cursor:
+                if isinstance(chunk_id, str) and chunk_id:
+                    _bump(chunk_id, "resolved_person_observations", count)
+    except sqlite3.Error:
+        return {}
+    finally:
+        conn.close()
+
+    return utility_by_chunk
+
+
 def build_route_dataset(
     *,
     chunks_path: Path,
@@ -211,6 +272,7 @@ def build_route_dataset(
     conversations_large_path: Optional[Path],
     identity_signals_large_path: Optional[Path],
     output_path: Path,
+    db_path: Optional[Path] = None,
     labels_path: Optional[Path] = None,
     skip_threshold: float = 0.10,
     large_threshold: float = 0.75,
@@ -244,11 +306,13 @@ def build_route_dataset(
     )
 
     human_labels = _load_human_labels(labels_path)
+    downstream_utility_by_chunk = _load_downstream_utility(db_path)
 
     written = 0
     missing_triage = 0
     missing_ids = 0
     empirical_large_labeled = 0
+    downstream_utility_labeled = 0
 
     with open_text_writer(output_path) as out_handle:
         for chunk in _iter_jsonl(chunks_path):
@@ -289,6 +353,10 @@ def build_route_dataset(
                 or conv_large.yield_nonempty
                 or ident_large.yield_nonempty
             )
+            utility = downstream_utility_by_chunk.get(chunk_id) or {}
+            timeline_ok_events = _as_int(utility.get("timeline_ok_events"))
+            resolved_person_obs = _as_int(utility.get("resolved_person_observations"))
+            downstream_utility_positive = timeline_ok_events > 0 or resolved_person_obs > 0
 
             label_route = _label_route(
                 triage_score=triage_score_val,
@@ -302,6 +370,10 @@ def build_route_dataset(
                 label_route = "llm_large"
                 label_source = "empirical_large_yield"
                 empirical_large_labeled += 1
+            if downstream_utility_positive and not any_yield and not any_large_yield:
+                label_route = "llm_small"
+                label_source = "downstream_utility"
+                downstream_utility_labeled += 1
 
             override = human_labels.get((chunk_id, text_hash))
             if override:
@@ -329,10 +401,15 @@ def build_route_dataset(
                     "conversations": {"items_count": conv.items_count, "error": conv.error, "model": conv.model},
                     "identity_signals": {"items_count": ident.items_count, "error": ident.error, "model": ident.model},
                 },
+                "downstream_utility": {
+                    "timeline_ok_events": timeline_ok_events,
+                    "resolved_person_observations": resolved_person_obs,
+                },
                 "derived": {
                     "any_yield": any_yield,
                     "any_large_yield": any_large_yield,
                     "low_quality": low_quality,
+                    "downstream_utility_positive": downstream_utility_positive,
                 },
             }
             if (
@@ -374,6 +451,7 @@ def build_route_dataset(
         "missing_triage": missing_triage,
         "missing_ids": missing_ids,
         "rows_labeled_empirical_large": empirical_large_labeled,
+        "rows_labeled_downstream_utility": downstream_utility_labeled,
     }
 
 
@@ -391,6 +469,7 @@ def main():
         conversations_large_path=Path(args.conversations_large) if args.conversations_large else None,
         identity_signals_large_path=Path(args.identity_signals_large) if args.identity_signals_large else None,
         output_path=Path(args.output),
+        db_path=Path(args.db) if args.db else None,
         labels_path=Path(args.labels) if args.labels else None,
         skip_threshold=float(args.skip_threshold),
         large_threshold=float(args.large_threshold),

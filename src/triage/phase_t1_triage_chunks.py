@@ -185,12 +185,42 @@ def _is_low_quality_from_features(features: Dict[str, Any]) -> bool:
     return False
 
 
+def _is_complex_narrative_from_features(features: Dict[str, Any]) -> bool:
+    tq = features.get("text_quality") or {}
+    struct = features.get("structure") or {}
+    entity = features.get("entity_hints") or {}
+    event = features.get("event_hints") or {}
+
+    char_len = _as_int(tq.get("char_len"))
+    nonempty_lines = _as_int(struct.get("nonempty_line_count"))
+    dialogue_markers = _as_int(struct.get("dialogue_marker_count"))
+    bullet_density = struct.get("bullet_density")
+    table_like = bool(struct.get("table_like"))
+    name_like = _as_int(entity.get("capitalized_name_count"))
+    date_like = _as_int(event.get("date_like_count"))
+    incident_verbs = _as_int(event.get("incident_verb_count"))
+    time_like = _as_int(event.get("time_like_count"))
+
+    if char_len < 800:
+        return False
+    if nonempty_lines < 8:
+        return False
+    if table_like:
+        return False
+    if isinstance(bullet_density, (int, float)) and bullet_density >= 0.25:
+        return False
+
+    narrative_signal_total = dialogue_markers + name_like + date_like + incident_verbs + time_like
+    return narrative_signal_total >= 4
+
+
 def _route_from_model_policy(
     *,
     probabilities: Dict[str, float],
     skip_threshold: float,
     large_threshold: float,
     low_quality: bool,
+    complex_narrative: bool,
     heuristic_score: float,
     heuristic_large_threshold: float,
 ) -> Tuple[str, List[str]]:
@@ -202,6 +232,9 @@ def _route_from_model_policy(
         return "skip", gates
     if large_prob >= large_threshold:
         gates.append("p_large_high")
+        return "llm_large", gates
+    if complex_narrative:
+        gates.append("complex_narrative")
         return "llm_large", gates
     if low_quality and heuristic_score >= heuristic_large_threshold:
         gates.append("low_quality_high_heuristic_score")
@@ -309,17 +342,18 @@ def build_triage(
             )
             score = score_from_features(features)
             token_est = estimate_tokens(text)
+            low_quality = _is_low_quality_from_features(features)
+            complex_narrative = _is_complex_narrative_from_features(features)
 
             route = "llm_small"
             if score < route_skip_threshold:
                 route = "skip"
-            elif score >= route_large_threshold:
+            elif score >= route_large_threshold or complex_narrative:
                 route = "llm_large"
             heuristic_route = route
 
             ml_summary = None
             if ml_route_mode != "off":
-                low_quality = _is_low_quality_from_features(features)
                 if ml_model_loaded and ml_model is not None:
                     probs = predict_route_probabilities(ml_model, text)
                     probs = {label: float(probs.get(label, 0.0)) for label in OFFICIAL_ROUTE_LABELS}
@@ -328,6 +362,7 @@ def build_triage(
                         skip_threshold=ml_route_skip_threshold,
                         large_threshold=ml_route_large_threshold,
                         low_quality=low_quality,
+                        complex_narrative=complex_narrative,
                         heuristic_score=score,
                         heuristic_large_threshold=route_large_threshold,
                     )
@@ -366,6 +401,10 @@ def build_triage(
                 "heuristic_route": heuristic_route,
                 "token_est": token_est,
                 "features": features,
+                "route_hints": {
+                    "low_quality": low_quality,
+                    "complex_narrative": complex_narrative,
+                },
             }
             if ml_summary is not None:
                 triage_record["ml_route"] = ml_summary

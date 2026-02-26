@@ -321,6 +321,57 @@ class TriagePhaseT1Test(unittest.TestCase):
             self.assertEqual(by_id["a:1-1"]["route"], "llm_small")
             self.assertEqual(by_id["a:1-1"]["ml_route"]["effective_route"], "llm_small")
 
+    def test_build_triage_routes_complex_narrative_to_large(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            chunks_path = root / "chunks.jsonl"
+            out_dir = root / "out_narrative"
+            lines = []
+            for idx in range(1, 15):
+                lines.append(
+                    f"Detective Jane Doe interviewed Witness Person {idx} about the incident and noted details."
+                )
+            lines.append("At 09:45 PM on 2025-04-10 she documented the sequence of events for review.")
+            narrative_text = "\n".join(lines)
+
+            self._write_jsonl(
+                chunks_path,
+                [
+                    {
+                        "chunk_id": "a:0-0",
+                        "file_id": "a",
+                        "page_start": 0,
+                        "page_end": 0,
+                        "text": narrative_text,
+                    }
+                ],
+            )
+
+            summary = build_triage(
+                chunks_path=chunks_path,
+                output_dir=out_dir,
+                route_large_threshold=0.99,
+                route_skip_threshold=0.01,
+            )
+
+            triage_rows = [
+                json.loads(line)
+                for line in Path(summary["triage_path"]).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(triage_rows), 1)
+            row = triage_rows[0]
+            self.assertEqual(row["route"], "llm_large")
+            self.assertEqual(row["heuristic_route"], "llm_large")
+            self.assertTrue(row["route_hints"]["complex_narrative"])
+
+            selected_large = [
+                json.loads(line)
+                for line in Path(summary["llm_large_path"]).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(selected_large), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

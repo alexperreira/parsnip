@@ -2,6 +2,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from typing import Any, Dict, Set
 
 import typer
 
@@ -46,6 +47,112 @@ def _dispatch_to_main(command: str, remainder, handler):
         sys.argv = prior_argv
 
 
+def _iter_jsonl_records(path: Path):
+    if not path.exists():
+        return
+    with path.open("r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict):
+                yield record
+
+
+def _load_chunk_ids_by_route(triage_path: Path, allowed_routes: Set[str]) -> Set[str]:
+    chunk_ids: Set[str] = set()
+    if not allowed_routes:
+        return chunk_ids
+    for record in _iter_jsonl_records(triage_path) or []:
+        chunk_id = record.get("chunk_id")
+        route = record.get("route")
+        if isinstance(chunk_id, str) and chunk_id and isinstance(route, str) and route in allowed_routes:
+            chunk_ids.add(chunk_id)
+    return chunk_ids
+
+
+def _load_chunk_ids_from_stream(chunks_path: Path) -> Set[str]:
+    chunk_ids: Set[str] = set()
+    for record in _iter_jsonl_records(chunks_path) or []:
+        chunk_id = record.get("chunk_id")
+        if isinstance(chunk_id, str) and chunk_id:
+            chunk_ids.add(chunk_id)
+    return chunk_ids
+
+
+def _collect_llm_small_retry_chunk_ids(output_paths: list[Path]) -> Set[str]:
+    existing_paths = [path for path in output_paths if path.exists()]
+    if not existing_paths:
+        return set()
+
+    by_chunk: Dict[str, Dict[str, Any]] = {}
+    for path in existing_paths:
+        for record in _iter_jsonl_records(path) or []:
+            chunk_id = record.get("chunk_id")
+            if not isinstance(chunk_id, str) or not chunk_id:
+                continue
+            state = by_chunk.setdefault(
+                chunk_id,
+                {
+                    "seen": 0,
+                    "any_items": False,
+                    "has_retry_error": False,
+                },
+            )
+            state["seen"] = int(state["seen"]) + 1
+            items = record.get("items")
+            if isinstance(items, list) and len(items) > 0:
+                state["any_items"] = True
+            error = record.get("error")
+            if isinstance(error, str) and error.strip():
+                lowered = error.strip().lower()
+                if "invalid_json" in lowered or "refus" in lowered:
+                    state["has_retry_error"] = True
+
+    expected_extractors = len(existing_paths)
+    retry_ids: Set[str] = set()
+    for chunk_id, state in by_chunk.items():
+        if bool(state["has_retry_error"]):
+            retry_ids.add(chunk_id)
+            continue
+        if int(state["seen"]) >= expected_extractors and not bool(state["any_items"]):
+            retry_ids.add(chunk_id)
+    return retry_ids
+
+
+def _write_filtered_chunks(
+    *,
+    input_chunks_path: Path,
+    output_chunks_path: Path,
+    include_chunk_ids: Set[str],
+) -> int:
+    if not input_chunks_path.exists() or not include_chunk_ids:
+        return 0
+
+    written = 0
+    with input_chunks_path.open("r", encoding="utf-8") as read_handle, output_chunks_path.open(
+        "w", encoding="utf-8"
+    ) as write_handle:
+        for raw_line in read_handle:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            chunk_id = record.get("chunk_id")
+            if not isinstance(chunk_id, str) or chunk_id not in include_chunk_ids:
+                continue
+            write_handle.write(json.dumps(record, ensure_ascii=True) + "\n")
+            written += 1
+    return written
+
+
 llm_app = typer.Typer(
     add_completion=False,
     help="LLM extraction commands.",
@@ -65,6 +172,7 @@ def _run_load_stage(
     entities_path: Path,
     events_path: Path,
     conversations_path: Path,
+    identity_signals_path: Path,
     db_path: Path,
     overwrite: bool = False,
 ):
@@ -82,6 +190,12 @@ def _run_load_stage(
         ["--input", str(conversations_path), "--db", str(db_path)],
         load_conversations_main,
     )
+    if identity_signals_path.exists():
+        _dispatch_to_main(
+            "load identity-signals",
+            ["--input", str(identity_signals_path), "--db", str(db_path)],
+            load_identity_signals_main,
+        )
 
 
 @app.command("pipeline", help="Run Phase 0-2 end-to-end.")
@@ -159,7 +273,10 @@ def load_manifest(ctx: typer.Context):
     _dispatch_to_main("load manifest", list(ctx.args), load_manifest_main)
 
 
-@load_app.command("all", help="Load entities, events, and conversations into SQLite.")
+@load_app.command(
+    "all",
+    help="Load entities, events, conversations, and identity signals into SQLite.",
+)
 def load_all(
     entities_input: str = typer.Option(
         "entities.jsonl",
@@ -176,6 +293,11 @@ def load_all(
         "--conversations-input",
         help="Conversations JSONL path (default: conversations.jsonl).",
     ),
+    identity_signals_input: str = typer.Option(
+        "identity_signals.jsonl",
+        "--identity-signals-input",
+        help="Identity signals JSONL path (default: identity_signals.jsonl).",
+    ),
     db: str = typer.Option(
         "output/store.sqlite",
         "--db",
@@ -191,6 +313,7 @@ def load_all(
         Path(entities_input),
         Path(events_input),
         Path(conversations_input),
+        Path(identity_signals_input),
         Path(db),
         overwrite=overwrite,
     )
@@ -301,6 +424,14 @@ def run(
             "triage llm_large chunks and write *.llm_large.jsonl outputs."
         ),
     ),
+    llm_retry_small_failures: bool = typer.Option(
+        True,
+        "--llm-retry-small-failures/--no-llm-retry-small-failures",
+        help=(
+            "Retry llm_small failures on the large model when extraction is empty or shows "
+            "invalid_json/refusal errors (default: enabled)."
+        ),
+    ),
     triage_keyword_packs_dir: str = typer.Option(
         None,
         "--triage-keyword-packs-dir",
@@ -392,9 +523,11 @@ def run(
     entities_path = output_path / "entities.jsonl"
     events_path = output_path / "events.jsonl"
     conversations_path = output_path / "conversations.jsonl"
+    identity_signals_path = output_path / "identity_signals.jsonl"
     entities_large_path = output_path / "entities.llm_large.jsonl"
     events_large_path = output_path / "events.llm_large.jsonl"
     conversations_large_path = output_path / "conversations.llm_large.jsonl"
+    identity_signals_large_path = output_path / "identity_signals.llm_large.jsonl"
     db_path = output_path / "store.sqlite"
 
     def _record_stage_timing(stage_name: str, started: float):
@@ -477,6 +610,11 @@ def run(
         _record_stage_timing("triage", stage_started)
         triage_ran = True
     if "llm" in selected:
+        if llm_retry_small_failures and not chunks_path.exists():
+            raise SystemExit(
+                "LLM retry requires chunks at "
+                f"{chunks_path}. Run chunk first or pass --no-llm-retry-small-failures."
+            )
         stage_started = time.monotonic()
         llm_small_effective_model = str(llm_small_model) if llm_small_model else str(llm_model)
         llm_large_effective_model = str(llm_large_model) if llm_large_model else str(llm_model)
@@ -503,6 +641,7 @@ def run(
             entities_out: Path,
             events_out: Path,
             conversations_out: Path,
+            identity_signals_out: Path,
             *,
             triage_routes: str | None = None,
             model_name: str,
@@ -547,23 +686,43 @@ def run(
                 ],
                 llm_conversations_main,
             )
+            _dispatch_to_main(
+                "llm identity-signals",
+                [
+                    "--input",
+                    str(input_chunks_path),
+                    "--output",
+                    str(identity_signals_out),
+                    *llm_common_args,
+                    *triage_args,
+                ],
+                llm_identity_signals_main,
+            )
 
         _run_llm_extractors(
             chunks_path,
             entities_path,
             events_path,
             conversations_path,
+            identity_signals_path,
             triage_routes="llm_small" if triage_filter_enabled else None,
             model_name=llm_small_effective_model,
         )
 
-        if llm_two_pass_eval:
+        retry_large_chunk_ids: Set[str] = set()
+        if llm_retry_small_failures:
+            retry_large_chunk_ids = _collect_llm_small_retry_chunk_ids(
+                [entities_path, events_path, conversations_path, identity_signals_path]
+            )
+
+        if llm_two_pass_eval and not retry_large_chunk_ids:
             if triage_filter_enabled:
                 _run_llm_extractors(
                     chunks_path,
                     entities_large_path,
                     events_large_path,
                     conversations_large_path,
+                    identity_signals_large_path,
                     triage_routes="llm_large",
                     model_name=llm_large_effective_model,
                 )
@@ -574,6 +733,31 @@ def run(
                     entities_large_path,
                     events_large_path,
                     conversations_large_path,
+                    identity_signals_large_path,
+                    model_name=llm_large_effective_model,
+                )
+        else:
+            large_chunk_ids: Set[str] = set()
+            if llm_two_pass_eval:
+                if triage_filter_enabled:
+                    large_chunk_ids.update(_load_chunk_ids_by_route(triage_path, {"llm_large"}))
+                elif triage_large_chunks_path.exists():
+                    large_chunk_ids.update(_load_chunk_ids_from_stream(triage_large_chunks_path))
+            large_chunk_ids.update(retry_large_chunk_ids)
+
+            runtime_large_chunks_path = output_path / "chunks.llm_large.runtime.jsonl"
+            written_large_chunks = _write_filtered_chunks(
+                input_chunks_path=chunks_path,
+                output_chunks_path=runtime_large_chunks_path,
+                include_chunk_ids=large_chunk_ids,
+            )
+            if written_large_chunks > 0:
+                _run_llm_extractors(
+                    runtime_large_chunks_path,
+                    entities_large_path,
+                    events_large_path,
+                    conversations_large_path,
+                    identity_signals_large_path,
                     model_name=llm_large_effective_model,
                 )
         _record_stage_timing("llm", stage_started)
@@ -583,6 +767,7 @@ def run(
             entities_path,
             events_path,
             conversations_path,
+            identity_signals_path,
             db_path,
             overwrite=False,
         )

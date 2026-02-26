@@ -104,10 +104,10 @@ Update the LLM stage to accept a chunk stream to process (rather than assuming �
 For multi-model routing:
 
 - [x] Route `llm_small` to the faster/cheaper model for high-confidence “easy” chunks.
-- [ ] Reserve `llm_large` for:
+- [x] Reserve `llm_large` for:
   - [x] low-quality but high-value chunks
-  - [ ] complex narrative sections
-  - [ ] chunks that failed `llm_small` (invalid JSON / refusal / empty extraction)
+  - [x] complex narrative sections
+  - [x] chunks that failed `llm_small` (invalid JSON / refusal / empty extraction)
 
 ## Stage 5: caching and reruns (critical for cost)
 
@@ -131,10 +131,10 @@ This enables:
 
 Prefer starting with a **classifier for routing**, not a full extractor:
 
-- [ ] Collect training labels from:
+- [x] Collect training labels from:
    - [x] existing LLM outputs (yield vs empty)
    - [x] operator “review” decisions
-   - [ ] downstream resolver/timeline utility signals
+   - [x] downstream resolver/timeline utility signals
 - [x] Train a lightweight model to predict `route` or “send_to_llm” probability.
 - [x] Keep a deterministic fallback and retain budget caps.
 
@@ -189,7 +189,7 @@ All metrics should be computable without storing raw chunk text in logs.
   - budget cap behavior
   - `triage.jsonl` schema validation + redaction rules
 - [x] Add golden tests with a tiny synthetic `chunks.jsonl` fixture.
-- [ ] Add an integration test for `fileparse run --steps extract-text,chunk,triage` producing stable outputs.
+- [x] Add an integration test for `fileparse run --steps extract-text,chunk,triage` producing stable outputs.
 
 ## Rollout sequence (minimize risk)
 

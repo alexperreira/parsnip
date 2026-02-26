@@ -25,7 +25,7 @@ class CliLoadHelpTest(unittest.TestCase):
         )
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, msg=output)
-        self.assertIn("Load entities, events, and conversations into SQLite.", output)
+        self.assertIn("Load entities, events, conversations, and identity signals into SQLite.", output)
         self.assertIn("--overwrite", output)
 
 

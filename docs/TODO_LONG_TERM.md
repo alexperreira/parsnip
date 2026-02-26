@@ -75,7 +75,7 @@ If you choose to add a UI:
   - Only send high-signal documents to LLM.
 - Add keyword + NER pre-filters.
 - Consider fine-tuning a smaller model for extraction.
-- Status update (2026-02-26): compute-strategy routing is active in the pipeline (triage + budgets + route-aware LLM filtering + optional `--llm-small-model`/`--llm-large-model` overrides). Remaining items are tracked in `docs/COMPUTE_STRATEGY.md`.
+- Status update (2026-02-26): compute-strategy routing is active in the pipeline (triage + budgets + route-aware LLM filtering + optional `--llm-small-model`/`--llm-large-model` overrides), and the remaining L8 checklist items in `docs/COMPUTE_STRATEGY.md` are now complete.
 
 ---
 

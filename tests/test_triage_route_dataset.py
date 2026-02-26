@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -204,6 +205,107 @@ class RouteDatasetBuilderTest(unittest.TestCase):
             self.assertEqual(row["labels"]["label_source"], "empirical_large_yield")
             self.assertTrue(row["derived"]["any_large_yield"])
             self.assertIn("outcomes_large", row)
+
+    def test_build_route_dataset_uses_downstream_utility_labels(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            chunks = root / "chunks.jsonl"
+            triage = root / "triage.jsonl"
+            entities = root / "entities.jsonl"
+            events = root / "events.jsonl"
+            conversations = root / "conversations.jsonl"
+            identity = root / "identity_signals.jsonl"
+            db_path = root / "store.sqlite"
+            out = root / "ml" / "route_dataset.jsonl"
+
+            self._write_jsonl(
+                chunks,
+                [
+                    {
+                        "file_id": "a",
+                        "chunk_id": "a:0-0",
+                        "page_start": 0,
+                        "page_end": 0,
+                        "text": "sparse chunk with little direct yield",
+                    },
+                ],
+            )
+            self._write_jsonl(
+                triage,
+                [
+                    {
+                        "file_id": "a",
+                        "chunk_id": "a:0-0",
+                        "score": 0.4,
+                        "route": "llm_small",
+                        "token_est": 8,
+                        "features": {"text_quality": {"char_len": 40}},
+                    }
+                ],
+            )
+            self._write_jsonl(entities, [])
+            self._write_jsonl(events, [])
+            self._write_jsonl(conversations, [])
+            self._write_jsonl(identity, [])
+
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute(
+                    "CREATE TABLE events ("
+                    "event_id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "event TEXT, date TEXT, confidence REAL, "
+                    "file_id TEXT NOT NULL, chunk_id TEXT NOT NULL, "
+                    "page_start INTEGER, page_end INTEGER, quote TEXT)"
+                )
+                conn.execute(
+                    "CREATE TABLE event_times ("
+                    "event_id INTEGER PRIMARY KEY,"
+                    "date_raw TEXT, date_start TEXT, date_end TEXT, precision TEXT, "
+                    "status TEXT NOT NULL, parser TEXT, anchor_date TEXT, notes_json TEXT)"
+                )
+                conn.execute(
+                    "CREATE TABLE person_observations ("
+                    "obs_id INTEGER PRIMARY KEY,"
+                    "name TEXT NOT NULL, name_norm TEXT NOT NULL, "
+                    "file_id TEXT NOT NULL, chunk_id TEXT NOT NULL, page_start INTEGER, page_end INTEGER)"
+                )
+                conn.execute(
+                    "CREATE TABLE person_cluster_members ("
+                    "person_id INTEGER NOT NULL, obs_id INTEGER NOT NULL, PRIMARY KEY(person_id, obs_id))"
+                )
+                conn.execute(
+                    "INSERT INTO events(event_id, event, file_id, chunk_id) VALUES (1, 'incident', 'a', 'a:0-0')"
+                )
+                conn.execute(
+                    "INSERT INTO event_times(event_id, status, date_start) VALUES (1, 'ok', '2025-01-02')"
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            summary = build_route_dataset(
+                chunks_path=chunks,
+                triage_path=triage,
+                entities_path=entities,
+                events_path=events,
+                conversations_path=conversations,
+                identity_signals_path=identity,
+                entities_large_path=None,
+                events_large_path=None,
+                conversations_large_path=None,
+                identity_signals_large_path=None,
+                output_path=out,
+                db_path=db_path,
+                include_features=True,
+            )
+            self.assertEqual(summary["rows_written"], 1)
+            self.assertEqual(summary["rows_labeled_downstream_utility"], 1)
+
+            row = json.loads(out.read_text(encoding="utf-8").strip())
+            self.assertEqual(row["labels"]["label_route"], "llm_small")
+            self.assertEqual(row["labels"]["label_source"], "downstream_utility")
+            self.assertEqual(row["downstream_utility"]["timeline_ok_events"], 1)
+            self.assertTrue(row["derived"]["downstream_utility_positive"])
 
 
 if __name__ == "__main__":
