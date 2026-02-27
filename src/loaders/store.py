@@ -2,7 +2,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = "7"
+SCHEMA_VERSION = "8"
 _PROMPT_HASH_RE = re.compile(r"^[0-9a-f]{32,128}$")
 
 
@@ -27,6 +27,8 @@ def ensure_schema(conn, overwrite=False):
             "kg_edge_evidence",
             "kg_edges",
             "cases",
+            "chunk_text_refs",
+            "chunks",
             "conversation_thread_participants",
             "conversation_thread_segments",
             "conversation_threads",
@@ -99,6 +101,27 @@ def ensure_schema(conn, overwrite=False):
         "virtual_path TEXT,"
         "mtime_utc TEXT,"
         "size_bytes INTEGER"
+        ")"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS chunks ("
+        "chunk_id TEXT PRIMARY KEY,"
+        "file_id TEXT NOT NULL,"
+        "page_start INTEGER NOT NULL,"
+        "page_end INTEGER NOT NULL,"
+        "signals_json TEXT,"
+        "text_ref TEXT"
+        ")"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS chunk_text_refs ("
+        "chunk_id TEXT PRIMARY KEY,"
+        "storage_path TEXT NOT NULL,"
+        "byte_start INTEGER,"
+        "byte_end INTEGER,"
+        "text_char_count INTEGER,"
+        "text_sha256 TEXT,"
+        "created_utc TEXT NOT NULL DEFAULT (datetime('now'))"
         ")"
     )
 
@@ -362,6 +385,28 @@ def ensure_schema(conn, overwrite=False):
             "prompt_hash": "TEXT",
         },
     )
+    _ensure_table_columns(
+        conn,
+        "chunks",
+        {
+            "page_start": "INTEGER",
+            "page_end": "INTEGER",
+            "signals_json": "TEXT",
+            "text_ref": "TEXT",
+        },
+    )
+    _ensure_table_columns(
+        conn,
+        "chunk_text_refs",
+        {
+            "storage_path": "TEXT",
+            "byte_start": "INTEGER",
+            "byte_end": "INTEGER",
+            "text_char_count": "INTEGER",
+            "text_sha256": "TEXT",
+            "created_utc": "TEXT",
+        },
+    )
 
     conn.execute(
         "INSERT INTO meta(key, value) VALUES ('schema_version', ?) "
@@ -375,6 +420,9 @@ def ensure_schema(conn, overwrite=False):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(entity)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_events_file_chunk ON events(file_id, chunk_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_events_date ON events(date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_file_id ON chunks(file_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_page_range ON chunks(file_id, page_start, page_end)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_chunk_text_refs_storage ON chunk_text_refs(storage_path)")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_conversations_file_chunk ON conversations(file_id, chunk_id)"
     )

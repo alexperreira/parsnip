@@ -20,6 +20,7 @@ from llm.extract_events import main as llm_events_main
 from llm.extract_identity_signals import main as llm_identity_signals_main
 from llm.provider_client import DEFAULT_GEMINI_BASE_URL, DEFAULT_OLLAMA_HOST, DEFAULT_OPENAI_BASE_URL
 from loaders.load_conversations import main as load_conversations_main
+from loaders.load_chunks import main as load_chunks_main
 from loaders.load_entities import main as load_entities_main
 from loaders.load_events import main as load_events_main
 from loaders.load_identity_signals import main as load_identity_signals_main
@@ -271,6 +272,11 @@ def load_identity_signals(ctx: typer.Context):
 @load_app.command("manifest", help="Load Phase 0 manifest JSONL into SQLite.")
 def load_manifest(ctx: typer.Context):
     _dispatch_to_main("load manifest", list(ctx.args), load_manifest_main)
+
+
+@load_app.command("chunks", help="Load chunks JSONL into SQLite.")
+def load_chunks(ctx: typer.Context):
+    _dispatch_to_main("load chunks", list(ctx.args), load_chunks_main)
 
 
 @load_app.command(
